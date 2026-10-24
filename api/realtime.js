@@ -158,7 +158,7 @@ export default {
       return json({
         ok: true,
         service: "ATLAS Realtime Voice",
-        version: "0.6.2",
+        version: "0.6.3",
         status: "online",
         model: "gpt-realtime-2.1-mini",
         actions: ACTION_TOOLS.map((tool) => tool.name),
@@ -216,7 +216,7 @@ export default {
 
 Speak naturally, warmly, calmly, and concisely. You are practical and capable, not theatrical.
 
-ATLAS 0.6.2 Actions + Voice Controls:
+ATLAS 0.6.3 Actions + Voice Controls:
 - You have client-owned function tools that can search local ATLAS data, create or update tasks, mark tasks complete or incomplete, save Inbox notes, add structured records, add timeline events, and add people.
 - When the user asks ATLAS to perform one of those actions, USE the appropriate function tool rather than merely explaining how.
 - Never claim an action succeeded until the function result says ok:true.
