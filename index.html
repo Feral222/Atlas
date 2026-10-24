@@ -127,7 +127,7 @@ box-shadow:0 0 0 1px rgba(241,215,142,.48),0 0 34px rgba(98,217,255,.26),inset 0
 </head>
 <body>
 <aside class="sidebar" id="sidebar">
-  <div class="brand"><div class="brand-mark">A</div><div><h1>ATLAS</h1><p>Advanced Tracking, Library & Archival System</p><span class="version">0.6.3 • Unified Chat</span></div></div>
+  <div class="brand"><div class="brand-mark">A</div><div><h1>ATLAS</h1><p>Advanced Tracking, Library & Archival System</p><span class="version">0.6.4 • Unified Chat</span></div></div>
   <nav id="desktopNav" class="nav-list"></nav>
   <div class="sidebar-footer">
     <button class="ghost-btn" id="exportBtn">Export backup</button>
@@ -145,7 +145,7 @@ box-shadow:0 0 0 1px rgba(241,215,142,.48),0 0 34px rgba(98,217,255,.26),inset 0
 <div id="toast" class="toast"></div>
 
 <script>
-const VERSION="0.6.3";
+const VERSION="0.6.4";
 const NAV=[["home","⌂","Home"],["atlas","✦","ATLAS Brain"],["inbox","✉","Inbox"],["actions","✓","Action Center"],["library","🗂","Library"],["timeline","◷","Timeline"],["medical","✚","Medical"],["legal","⚖","Legal"],["housing","⌂","Housing"],["finance","$","Finance"],["vehicles","🚗","Vehicles"],["pets","🐈","Pets"],["people","👥","People"],["knowledge","📚","Knowledge"],["settings","⚙","Settings"]];
 const AREAS=["General","Medical","Legal","Housing","Finance","Vehicles","Pets","People","Knowledge"];
 const defaults={version:3,tasks:[{id:"seed1",title:"Follow up on BMW claim",done:false,area:"Legal",due:"",priority:"high"},{id:"seed2",title:"Review LADWP payment arrangement",done:false,area:"Housing",due:"",priority:"medium"},{id:"seed3",title:"Track kitten vaccinations",done:false,area:"Pets",due:"",priority:"medium"}],notes:[],events:[{id:"event1",date:"2026-05-03",title:"BMW collision",area:"Vehicles",details:"Rear collision; vehicle became undrivable."}],people:[{id:"p1",name:"Luis",relationship:"Partner",notes:"Household member"},{id:"p2",name:"Gerardo Zaldivar",relationship:"LACDA caseworker",notes:"Housing contact"}],records:[],sections:{medical:["Providers","Medications","Lab results","Procedures","Insurance"],legal:["Active matters","Evidence","Correspondence","Deadlines","Contacts"],housing:["Lease","LACDA","Utilities","Repairs","Inspections"],finance:["Banking","Bills","Benefits","Receipts","Taxes"],vehicles:["BMW","E-bikes","Scooter","Insurance","Maintenance"],pets:["Profiles","Vaccinations","Vet records","Photos","Medications"],knowledge:["Reference notes","Research","How-to guides","Important records"]}};
@@ -153,6 +153,7 @@ const $=s=>document.querySelector(s),content=$("#content"),pageTitle=$("#pageTit
 const ATLAS_BACKEND_ORIGIN=location.hostname.endsWith(".vercel.app")?location.origin:"https://atlas-three-ochre.vercel.app";
 const ATLAS_API_URL=ATLAS_BACKEND_ORIGIN+"/api/chat";
 const ATLAS_REALTIME_URL=ATLAS_BACKEND_ORIGIN+"/api/realtime";
+const ATLAS_SYNC_URL=ATLAS_BACKEND_ORIGIN+"/api/sync";
 let currentPage="home",docs=[],editingTaskId=null,atlasSending=false,
 customCategories=JSON.parse(localStorage.getItem("atlasCustomCategories")||"[]"),
 atlasChat=JSON.parse(localStorage.getItem("atlasChatV1")||"[]");
@@ -162,12 +163,156 @@ let atlasVoice={
   voice:localStorage.getItem("atlasVoiceName")||"cedar"
 };
 let atlasPendingAttachments=[];
+
+let atlasSyncApplying=false;
+let atlasSync={
+  status:"idle",
+  inFlight:false,
+  timer:null,
+  revision:Number(localStorage.getItem("atlasSyncRevision")||0)||0,
+  initialized:localStorage.getItem("atlasSyncInitialized")==="1",
+  lastSync:localStorage.getItem("atlasSyncLastAt")||"",
+  deviceId:localStorage.getItem("atlasSyncDeviceId")||""
+};
+if(!atlasSync.deviceId){
+  atlasSync.deviceId="device-"+Date.now()+"-"+Math.random().toString(36).slice(2,10);
+  localStorage.setItem("atlasSyncDeviceId",atlasSync.deviceId);
+}
+let atlasSyncOps=(()=>{try{const x=JSON.parse(localStorage.getItem("atlasSyncOps")||"[]");return Array.isArray(x)?x:[]}catch{return[]}})();
+
 function clone(o){return JSON.parse(JSON.stringify(o))}
 function normalize(raw){const b=clone(defaults);raw=raw&&typeof raw==="object"?raw:{};return{version:3,tasks:Array.isArray(raw.tasks)?raw.tasks.map(t=>({id:String(t.id||uid()),title:String(t.title||"Untitled task"),done:!!t.done,area:t.area||"General",due:t.due||"",priority:t.priority||"medium"})):b.tasks,notes:Array.isArray(raw.notes)?raw.notes:[],events:Array.isArray(raw.events)?raw.events:[],people:Array.isArray(raw.people)?raw.people:[],records:Array.isArray(raw.records)?raw.records:[],sections:raw.sections||b.sections}}
 function loadData(){for(const key of ["atlasDataV3","atlasDataV2","atlasData"]){const x=localStorage.getItem(key);if(x){try{const d=normalize(JSON.parse(x));localStorage.setItem("atlasDataV3",JSON.stringify(d));return d}catch{}}}return clone(defaults)}
 let data=loadData();
-function save(){localStorage.setItem("atlasDataV3",JSON.stringify(data))}
+let atlasLastSavedData=clone(data);
+
 function uid(p="id"){return p+"-"+Date.now()+"-"+Math.random().toString(36).slice(2,8)}
+function atlasNow(){return new Date().toISOString()}
+function atlasSyncOpId(){return "op-"+Date.now()+"-"+Math.random().toString(36).slice(2,10)}
+function atlasMessageKey(m){
+  if(m&&m._syncId)return String(m._syncId);
+  const s=[m?.role||"",m?.at||"",m?.source||"",m?.content||""].join("|");
+  let h=2166136261;
+  for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}
+  return "msg-"+(h>>>0).toString(36)+"-"+String(m?.at||"").replace(/\D/g,"").slice(-8);
+}
+function ensureAtlasMessageIds(list){
+  return (Array.isArray(list)?list:[]).map(m=>({...m,_syncId:atlasMessageKey(m)}));
+}
+atlasChat=ensureAtlasMessageIds(atlasChat);
+let atlasLastSavedChat=clone(atlasChat);
+
+function saveAtlasSyncOps(){localStorage.setItem("atlasSyncOps",JSON.stringify(atlasSyncOps.slice(-1000)))}
+function queueAtlasSyncOp(op){
+  if(atlasSyncApplying||!op)return;
+  atlasSyncOps.push({id:atlasSyncOpId(),at:atlasNow(),...op});
+  saveAtlasSyncOps();
+  scheduleAtlasSync();
+}
+function atlasCollections(x){return{tasks:x.tasks||[],notes:x.notes||[],events:x.events||[],people:x.people||[],records:x.records||[]}}
+function queueAtlasDataDiff(before,after){
+  if(atlasSyncApplying)return;
+  const a=atlasCollections(before||{}),b=atlasCollections(after||{});
+  for(const collection of Object.keys(b)){
+    const oldMap=new Map((a[collection]||[]).map(x=>[String(x.id),x]));
+    const newMap=new Map((b[collection]||[]).map(x=>[String(x.id),x]));
+    for(const [id,item] of newMap){
+      const prev=oldMap.get(id);
+      if(!prev||JSON.stringify(prev)!==JSON.stringify(item))queueAtlasSyncOp({type:"upsert",collection,item:clone(item)});
+    }
+    for(const [id] of oldMap)if(!newMap.has(id))queueAtlasSyncOp({type:"delete",collection,id});
+  }
+}
+function save(){
+  const before=atlasLastSavedData;
+  localStorage.setItem("atlasDataV3",JSON.stringify(data));
+  queueAtlasDataDiff(before,data);
+  atlasLastSavedData=clone(data);
+}
+function atlasSyncStateLabel(){
+  if(!brainPassword())return"Sync locked";
+  if(atlasSync.status==="syncing")return"Syncing…";
+  if(atlasSync.status==="error")return"Sync retrying";
+  if(atlasSync.lastSync)return"Synced";
+  return"Sync ready";
+}
+function updateAtlasSyncBadge(){
+  const el=$("#atlasSyncBadge");if(el)el.textContent=atlasSyncStateLabel();
+}
+function scheduleAtlasSync(delay=550){
+  if(!brainPassword())return;
+  clearTimeout(atlasSync.timer);
+  atlasSync.timer=setTimeout(()=>atlasSyncNow({silent:true}),delay);
+}
+function applyAtlasOpLocal(op){
+  if(!op)return;
+  if(op.type==="upsert"&&["tasks","notes","events","people","records"].includes(op.collection)&&op.item?.id){
+    const list=data[op.collection]||[];
+    const i=list.findIndex(x=>String(x.id)===String(op.item.id));
+    if(i>=0)list[i]=clone(op.item);else list.unshift(clone(op.item));
+    return;
+  }
+  if(op.type==="delete"&&["tasks","notes","events","people","records"].includes(op.collection)){
+    data[op.collection]=(data[op.collection]||[]).filter(x=>String(x.id)!==String(op.id));return;
+  }
+  if(op.type==="chat_upsert"&&op.message){
+    const msg={...clone(op.message),_syncId:atlasMessageKey(op.message)};
+    const i=atlasChat.findIndex(x=>atlasMessageKey(x)===msg._syncId);
+    if(i>=0)atlasChat[i]=msg;else atlasChat.push(msg);return;
+  }
+  if(op.type==="chat_clear"){atlasChat=[];return}
+  if(op.type==="category_add"&&op.name&&!customCategories.some(x=>x.toLowerCase()===String(op.name).toLowerCase()))customCategories.push(String(op.name));
+}
+function applyAtlasServerState(state,pendingOps=[]){
+  atlasSyncApplying=true;
+  try{
+    if(state?.data)data=normalize(state.data);
+    atlasChat=ensureAtlasMessageIds(state?.chat||[]).slice(-100);
+    customCategories=Array.isArray(state?.customCategories)?state.customCategories.map(String):[];
+    for(const op of pendingOps)applyAtlasOpLocal(op);
+    localStorage.setItem("atlasDataV3",JSON.stringify(data));
+    localStorage.setItem("atlasChatV1",JSON.stringify(atlasChat.slice(-100)));
+    localStorage.setItem("atlasCustomCategories",JSON.stringify(customCategories));
+    atlasLastSavedData=clone(data);
+    atlasLastSavedChat=clone(atlasChat);
+  }finally{atlasSyncApplying=false}
+}
+async function atlasSyncNow({silent=false}={}){
+  const password=brainPassword();
+  if(!password||atlasSync.inFlight)return false;
+  atlasSync.inFlight=true;atlasSync.status="syncing";updateAtlasSyncBadge();
+  const sentOps=atlasSyncOps.map(clone);
+  const seed=!atlasSync.initialized?{data:clone(data),chat:ensureAtlasMessageIds(atlasChat),customCategories:[...customCategories]}:null;
+  try{
+    const res=await fetch(ATLAS_SYNC_URL,{
+      method:"POST",
+      headers:{"Content-Type":"application/json","X-Atlas-Password":password},
+      body:JSON.stringify({device_id:atlasSync.deviceId,client_revision:atlasSync.revision,seed,ops:sentOps})
+    });
+    const body=await res.json().catch(()=>({}));
+    if(res.status===401){localStorage.removeItem("atlasBrainPassword");throw new Error("ATLAS sync password rejected.")}
+    if(!res.ok)throw new Error(body.detail||body.error||("Sync failed ("+res.status+")."));
+    const sentIds=new Set(sentOps.map(x=>x.id));
+    atlasSyncOps=atlasSyncOps.filter(x=>!sentIds.has(x.id));
+    saveAtlasSyncOps();
+    applyAtlasServerState(body.state,atlasSyncOps);
+    atlasSync.revision=Number(body.revision||0)||0;
+    atlasSync.initialized=true;
+    atlasSync.lastSync=body.updated_at||atlasNow();
+    atlasSync.status="ok";
+    localStorage.setItem("atlasSyncRevision",String(atlasSync.revision));
+    localStorage.setItem("atlasSyncInitialized","1");
+    localStorage.setItem("atlasSyncLastAt",atlasSync.lastSync);
+    if(currentPage==="atlas"||currentPage==="home"||currentPage==="actions"||currentPage==="inbox"||currentPage==="timeline"||currentPage==="people")render();
+    if(atlasSyncOps.length)scheduleAtlasSync(250);
+    return true;
+  }catch(err){
+    console.error("ATLAS sync error",err);
+    atlasSync.status="error";updateAtlasSyncBadge();
+    if(!silent)toast("ATLAS sync will retry");
+    return false;
+  }finally{atlasSync.inFlight=false;updateAtlasSyncBadge()}
+}
 function esc(s=""){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2200)}
 function fmt(d){if(!d)return"";const x=new Date(d+"T12:00:00");return isNaN(x)?d:x.toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"})}
@@ -182,7 +327,7 @@ function go(p){if(p!=="actions")editingTaskId=null;currentPage=p;$("#sidebar").c
 function greet(){const h=new Date().getHours();$("#greeting").textContent=(h<12?"Good morning":h<18?"Good afternoon":"Good evening")+" • ATLAS "+VERSION}
 function taskList(ts){if(!ts.length)return`<div class="empty">Nothing here yet.</div>`;return`<div class="list">${ts.map(t=>`<div class="list-item ${t.done?"done":""}"><button class="task-check ${t.done?"checked":""}" data-task-check="${esc(t.id)}" aria-label="${t.done?"Mark task incomplete":"Mark task completed"}"></button><div><div class="item-title">${esc(t.title)}</div><span class="pill">${esc(t.area)}</span><span class="pill ${esc(t.priority)}">${esc(t.priority)}</span>${t.due?`<span class="pill">${esc(fmt(t.due))}</span>`:""}</div><select class="task-action" data-task-action="${esc(t.id)}"><option value="" selected>Task actions…</option><option value="edit">Edit</option><option value="${t.done?"incomplete":"complete"}">${t.done?"Mark Incomplete":"Mark Completed"}</option><option value="delete">Delete</option></select></div>`).join("")}</div>`}
 function timelineList(ev){if(!ev.length)return`<div class="empty">No events yet.</div>`;return`<div class="card timeline">${ev.map(e=>`<div class="timeline-item"><strong>${esc(e.title)}</strong><div class="muted">${esc(fmt(e.date))} • ${esc(e.area||"General")}</div>${e.details?`<div class="record-body">${esc(e.details)}</div>`:""}<button class="small-btn" data-event-delete="${esc(e.id)}">Delete</button></div>`).join("")}</div>`}
-function dashboard(){const p={high:0,medium:1,low:2};const open=[...data.tasks].filter(t=>!t.done).sort((a,b)=>(p[a.priority]??1)-(p[b.priority]??1));const quickIds=["library","timeline","medical","legal","housing","finance","vehicles","pets","people","knowledge"];return`<div class="card brain-launch"><div class="brain-launch-inner"><div class="atlas-orb"><span class="atlas-orb-glyph">A</span></div><div><div class="brain-kicker">ATLAS 0.6.3 • Unified Chat</div><div class="brain-title">Your private ATLAS intelligence can now act.</div><div class="brain-copy">Ask ATLAS to create and update tasks, save notes and records, search your data, or use live voice to do the same.</div></div><button class="primary-btn" data-open="atlas">Open ATLAS</button></div></div><div class="mythic-divider"></div><div class="grid cols-4"><div class="card"><h3>Open tasks</h3><div class="big">${open.length}</div><div class="muted">Across ATLAS</div></div><div class="card"><h3>Inbox</h3><div class="big">${data.notes.length}</div><div class="muted">Notes and captures</div></div><div class="card"><h3>Records</h3><div class="big">${data.records.length}</div><div class="muted">Structured records</div></div><div class="card"><h3>Documents</h3><div class="big">${docs.length}</div><div class="muted">Stored on this device</div></div></div><div class="section-title"><h3>Quick access</h3></div><div class="grid cols-4">${quickIds.map(id=>NAV.find(n=>n[0]===id)).filter(Boolean).map(([id,ic,l])=>`<button class="quick-card" data-open="${id}"><span class="quick-icon">${ic}</span><span><strong>${l}</strong><br><small class="muted">Open workspace</small></span></button>`).join("")}</div><div class="section-title"><h3>Priority tasks</h3><button class="small-btn" data-open="actions">View all</button></div>${taskList(open.slice(0,6))}<div class="section-title"><h3>Recent timeline</h3><button class="small-btn" data-open="timeline">Open timeline</button></div>${timelineList([...data.events].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,4))}`}
+function dashboard(){const p={high:0,medium:1,low:2};const open=[...data.tasks].filter(t=>!t.done).sort((a,b)=>(p[a.priority]??1)-(p[b.priority]??1));const quickIds=["library","timeline","medical","legal","housing","finance","vehicles","pets","people","knowledge"];return`<div class="card brain-launch"><div class="brain-launch-inner"><div class="atlas-orb"><span class="atlas-orb-glyph">A</span></div><div><div class="brain-kicker">ATLAS 0.6.4 • Sync</div><div class="brain-title">Your private ATLAS intelligence can now act.</div><div class="brain-copy">Chat, tasks, notes, records, timeline and people now sync privately between your ATLAS Home Screen app and Safari. Documents remain local to each device for now.</div></div><button class="primary-btn" data-open="atlas">Open ATLAS</button></div></div><div class="mythic-divider"></div><div class="grid cols-4"><div class="card"><h3>Open tasks</h3><div class="big">${open.length}</div><div class="muted">Across ATLAS</div></div><div class="card"><h3>Inbox</h3><div class="big">${data.notes.length}</div><div class="muted">Notes and captures</div></div><div class="card"><h3>Records</h3><div class="big">${data.records.length}</div><div class="muted">Structured records</div></div><div class="card"><h3>Documents</h3><div class="big">${docs.length}</div><div class="muted">Stored on this device</div></div></div><div class="section-title"><h3>Quick access</h3></div><div class="grid cols-4">${quickIds.map(id=>NAV.find(n=>n[0]===id)).filter(Boolean).map(([id,ic,l])=>`<button class="quick-card" data-open="${id}"><span class="quick-icon">${ic}</span><span><strong>${l}</strong><br><small class="muted">Open workspace</small></span></button>`).join("")}</div><div class="section-title"><h3>Priority tasks</h3><button class="small-btn" data-open="actions">View all</button></div>${taskList(open.slice(0,6))}<div class="section-title"><h3>Recent timeline</h3><button class="small-btn" data-open="timeline">Open timeline</button></div>${timelineList([...data.events].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,4))}`}
 function inbox(){return`<div class="card"><h3>Quick capture</h3><textarea id="noteInput" rows="4" placeholder="Capture something now. Sort it later."></textarea><div style="margin-top:10px"><button class="primary-btn" id="saveNoteBtn">Save to Inbox</button></div></div><div class="section-title"><h3>Inbox items</h3></div><div class="list">${data.notes.length?data.notes.map(n=>`<div class="list-item"><div>📝</div><div><div class="item-title">${esc(n.text)}</div><small class="muted">${new Date(n.created).toLocaleString()}</small></div><button class="small-btn" data-note-delete="${esc(n.id)}">Delete</button></div>`).join(""):`<div class="empty">Your Inbox is empty.</div>`}</div>`}
 function actions(){
 const e=editingTaskId?data.tasks.find(t=>t.id===editingTaskId):null;
@@ -315,7 +460,19 @@ async function handleRealtimeResponseDone(event){
   if(atlasVoice.active)setVoiceStatus("listening");
 }
 
-function saveAtlasChat(){localStorage.setItem("atlasChatV1",JSON.stringify(atlasChat.slice(-40)))}
+function saveAtlasChat(){
+  atlasChat=ensureAtlasMessageIds(atlasChat).slice(-100);
+  localStorage.setItem("atlasChatV1",JSON.stringify(atlasChat));
+  if(!atlasSyncApplying){
+    if(atlasChat.length===0&&atlasLastSavedChat.length)queueAtlasSyncOp({type:"chat_clear"});
+    const oldMap=new Map(atlasLastSavedChat.map(m=>[atlasMessageKey(m),m]));
+    for(const m of atlasChat){
+      const id=atlasMessageKey(m),prev=oldMap.get(id);
+      if(!prev||JSON.stringify(prev)!==JSON.stringify(m))queueAtlasSyncOp({type:"chat_upsert",message:clone(m)});
+    }
+  }
+  atlasLastSavedChat=clone(atlasChat);
+}
 function brainPassword(){return localStorage.getItem("atlasBrainPassword")||""}
 function atlasVoiceButtonIcon(active){
   return active
@@ -355,7 +512,7 @@ function atlasChatPage(){
       </div>
     </div>
     ${!unlocked?`<div class="brain-lock"><h3>Unlock ATLAS Brain</h3><p class="muted">Enter your ATLAS access password. It is saved only in this browser on this device for this prototype.</p><input id="atlasPasswordInput" type="password" autocomplete="current-password" placeholder="ATLAS access password"><button class="primary-btn" id="atlasUnlockBtn" type="button">Unlock ATLAS</button></div>`:
-    `<div class="brain-tools"><div class="brain-tools-left"><span class="pill">Text brain: online</span><span class="pill">Actions: live</span><span class="pill">Model: GPT-6 Luna</span></div><div class="brain-tools-right"><button class="small-btn" id="atlasClearBtn" type="button">Clear conversation</button><button class="small-btn" id="atlasForgetBtn" type="button">Forget password</button></div></div>
+    `<div class="brain-tools"><div class="brain-tools-left"><span class="pill">Text brain: online</span><span class="pill">Actions: live</span><span class="pill" id="atlasSyncBadge">${atlasSyncStateLabel()}</span><span class="pill">Model: GPT-6 Luna</span></div><div class="brain-tools-right"><button class="small-btn" id="atlasClearBtn" type="button">Clear conversation</button><button class="small-btn" id="atlasForgetBtn" type="button">Forget password</button></div></div>
     <div class="chat-window" id="atlasChatWindow">${msgs.length?msgs.map(m=>`<div class="chat-msg ${m.role==="user"?"user":"assistant"}"><div class="chat-bubble"><div class="chat-role">${m.role==="user"?"You":"ATLAS"}</div>${esc(m.content)}${atlasAttachmentChips((m.attachments||[]).map(a=>({...a,pending:false})))}</div></div>`).join(""):`<div class="chat-empty"><div><div class="atlas-orb" style="margin:0 auto 18px"><span class="atlas-orb-glyph">A</span></div><strong>ATLAS is ready.</strong><p>Type a message, attach something with +, or tap the voice button to talk with Cedar.</p></div></div>`}${atlasSending?`<div class="chat-msg assistant"><div class="chat-bubble"><div class="chat-role">ATLAS</div><span class="thinking-dots"><i></i><i></i><i></i></span></div></div>`:""}</div>
 
     <div class="atlas-composer-wrap">
@@ -693,7 +850,7 @@ async function sendAtlasMessage(){
     setTimeout(()=>{const w=$("#atlasChatWindow");if(w)w.scrollTop=w.scrollHeight},40);
   }
 }
-function settings(){return`<div class="grid cols-2"><div class="card"><h3>Version</h3><div class="big">0.6.3</div><p class="muted">Actions — local tool-calling stage.</p></div><div class="card"><h3>ATLAS Brain + Voice</h3><p class="badge-ok">Secure text, Realtime voice, and client-side action tools online.</p><p class="muted">Your OpenAI API key remains server-side. This device stores only your temporary ATLAS access password and local conversation history.</p><button class="small-btn" data-open="atlas">Open ATLAS Brain</button></div><div class="card"><h3>Local storage</h3><p class="muted">Tasks, notes, records, events, people and ATLAS chat history are stored in this browser. Uploaded files use IndexedDB.</p></div><div class="card"><h3>Backup</h3><p class="muted">Use Export backup in the menu to save your ATLAS metadata as a JSON file. Chat history is currently separate from that backup.</p></div><div class="card"><h3>Privacy</h3><p class="muted">Text messages are sent through your private ATLAS backend with <strong>store:false</strong>. Live voice uses short-lived Realtime client secrets minted by Vercel; your permanent OpenAI key stays server-side.</p></div><div class="card"><h3>Reset</h3><p class="muted">This resets metadata only; uploaded documents and ATLAS Brain credentials remain unless separately cleared.</p><button class="danger-btn" id="clearDataBtn">Reset metadata</button></div></div>`}
+function settings(){return`<div class="grid cols-2"><div class="card"><h3>Version</h3><div class="big">0.6.4</div><p class="muted">Sync — private shared state stage.</p></div><div class="card"><h3>ATLAS Brain + Voice</h3><p class="badge-ok">Secure text, Realtime voice, and client-side action tools online.</p><p class="muted">Your OpenAI API key remains server-side. This device stores only your temporary ATLAS access password and local conversation history.</p><button class="small-btn" data-open="atlas">Open ATLAS Brain</button></div><div class="card"><h3>Local storage</h3><p class="muted">Tasks, notes, records, events, people and ATLAS chat history are stored in this browser. Uploaded files use IndexedDB.</p></div><div class="card"><h3>Backup</h3><p class="muted">Use Export backup in the menu to save your ATLAS metadata as a JSON file. Chat history is currently separate from that backup.</p></div><div class="card"><h3>Privacy</h3><p class="muted">Text messages are sent through your private ATLAS backend with <strong>store:false</strong>. Live voice uses short-lived Realtime client secrets minted by Vercel; your permanent OpenAI key stays server-side.</p></div><div class="card"><h3>Private sync</h3><p class="badge-ok">Encrypted ATLAS state sync is enabled.</p><p class="muted">Chat, tasks, notes, records, timeline, people and custom categories sync through your private Vercel storage. Documents/photos remain local for now.</p><button class="small-btn" id="atlasSyncNowBtn">Sync now</button></div><div class="card"><h3>Reset</h3><p class="muted">This resets metadata only; uploaded documents and ATLAS Brain credentials remain unless separately cleared.</p><button class="danger-btn" id="clearDataBtn">Reset metadata</button></div></div>`}
 function searchResults(q){q=q.toLowerCase().trim();if(!q)return dashboard();const th=data.tasks.filter(t=>(`${t.title} ${t.area} ${t.priority}`).toLowerCase().includes(q)),nh=data.notes.filter(n=>String(n.text||"").toLowerCase().includes(q)),rh=data.records.filter(r=>(`${r.title} ${r.area} ${r.type} ${r.details} ${(r.tags||[]).join(" ")}`).toLowerCase().includes(q)),dh=docs.filter(d=>(`${d.name} ${d.area} ${(d.tags||[]).join(" ")}`).toLowerCase().includes(q)),eh=data.events.filter(e=>(`${e.title} ${e.area} ${e.details}`).toLowerCase().includes(q)),ph=data.people.filter(p=>(`${p.name} ${p.relationship} ${p.notes}`).toLowerCase().includes(q));return`<div class="section-title"><h3>Search results for “${esc(q)}”</h3></div><div class="grid cols-3"><div class="card"><h3>Tasks</h3>${th.length?th.map(t=>`<p>${esc(t.title)}</p>`).join(""):`<p class="muted">No matches</p>`}</div><div class="card"><h3>Records</h3>${rh.length?rh.map(r=>`<p>${esc(r.title)} <span class="pill">${esc(r.area)}</span></p>`).join(""):`<p class="muted">No matches</p>`}</div><div class="card"><h3>Documents</h3>${dh.length?dh.map(d=>`<p>${esc(d.name)}</p>`).join(""):`<p class="muted">No matches</p>`}</div><div class="card"><h3>Timeline</h3>${eh.length?eh.map(e=>`<p>${esc(fmt(e.date))} — ${esc(e.title)}</p>`).join(""):`<p class="muted">No matches</p>`}</div><div class="card"><h3>Inbox</h3>${nh.length?nh.map(n=>`<p>${esc(n.text)}</p>`).join(""):`<p class="muted">No matches</p>`}</div><div class="card"><h3>People</h3>${ph.length?ph.map(p=>`<p>${esc(p.name)} — ${esc(p.relationship)}</p>`).join(""):`<p class="muted">No matches</p>`}</div></div>`}
 function render(){const tm={home:"Command Center",atlas:"ATLAS Brain",inbox:"Inbox",actions:"Action Center",library:"Document Library",timeline:"Timeline",people:"People",settings:"Settings"};pageTitle.textContent=tm[currentPage]||currentPage[0].toUpperCase()+currentPage.slice(1);const hero=document.querySelector(".hero");if(hero)hero.style.display=currentPage==="atlas"?"none":"grid";content.innerHTML=currentPage==="home"?dashboard():currentPage==="atlas"?atlasChatPage():currentPage==="inbox"?inbox():currentPage==="actions"?actions():currentPage==="library"?library():currentPage==="timeline"?timeline():currentPage==="people"?people():currentPage==="settings"?settings():sectionPage(currentPage);bind();if(currentPage==="atlas")setTimeout(()=>{const w=$("#atlasChatWindow");if(w)w.scrollTop=w.scrollHeight;setVoiceStatus(atlasVoice.status)},20)}
 
@@ -707,6 +864,7 @@ function wireTaskCategory(){
     if(!allCategories().some(x=>x.toLowerCase()===name.toLowerCase())){
       customCategories.push(name);
       localStorage.setItem("atlasCustomCategories",JSON.stringify(customCategories));
+      queueAtlasSyncOp({type:"category_add",name});
     }
     s.innerHTML=areaOpts(name);
     s.value=name;
@@ -731,7 +889,7 @@ function addToIPhoneCalendar(task){
 }
 function bind(){
 wireTaskCategory();
-if($("#atlasUnlockBtn"))$("#atlasUnlockBtn").onclick=()=>{const p=($("#atlasPasswordInput")?.value||"").trim();if(!p)return;localStorage.setItem("atlasBrainPassword",p);render();toast("ATLAS Brain unlocked")};
+if($("#atlasUnlockBtn"))$("#atlasUnlockBtn").onclick=()=>{const p=($("#atlasPasswordInput")?.value||"").trim();if(!p)return;localStorage.setItem("atlasBrainPassword",p);render();toast("ATLAS Brain unlocked");atlasSyncNow({silent:false})};
 if($("#atlasClearBtn"))$("#atlasClearBtn").onclick=()=>{if(confirm("Clear the ATLAS conversation on this device?")){atlasChat=[];saveAtlasChat();render();toast("Conversation cleared")}};
 if($("#atlasForgetBtn"))$("#atlasForgetBtn").onclick=()=>{localStorage.removeItem("atlasBrainPassword");render();toast("ATLAS password forgotten on this device")};
 if($("#atlasMessage")){
@@ -789,6 +947,7 @@ document.querySelectorAll("[data-atlas-attachment-remove]").forEach(b=>b.onclick
   render();
 });
 updateAtlasPrimaryControl();
+if($("#atlasSyncNowBtn"))$("#atlasSyncNowBtn").onclick=()=>atlasSyncNow({silent:false});
 document.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>go(b.dataset.open));
 document.querySelectorAll("[data-task-check]").forEach(b=>b.onclick=()=>{const id=b.dataset.taskCheck,t=data.tasks.find(x=>x.id===id);if(!t)return;const becomingDone=!t.done,row=b.closest(".list-item");b.classList.toggle("checked",becomingDone);b.classList.add("animating");if(row)row.classList.add("task-finishing");setTimeout(()=>{t.done=becomingDone;save();render();toast(becomingDone?"Task completed":"Task moved back to open tasks")},430)});
 document.querySelectorAll("[data-task-action]").forEach(s=>s.onchange=()=>{const id=s.dataset.taskAction,action=s.value,t=data.tasks.find(x=>x.id===id);if(!t)return;if(action==="edit"){editingTaskId=id;go("actions");setTimeout(()=>$("#newTaskInput")?.focus(),50);return}if(action==="complete"){t.done=true;save();render();toast("Task marked completed");return}if(action==="incomplete"){t.done=false;save();render();toast("Task moved to open tasks");return}if(action==="delete"){if(confirm(`Delete "${t.title}"?`)){data.tasks=data.tasks.filter(x=>x.id!==id);if(editingTaskId===id)editingTaskId=null;save();render();toast("Task deleted")}else{s.value=""}}});
@@ -811,9 +970,12 @@ $("#globalSearch").addEventListener("input",e=>{pageTitle.textContent=e.target.v
 $("#menuBtn").onclick=()=>$("#sidebar").classList.toggle("open");
 $("#themeBtn").onclick=()=>{document.documentElement.classList.toggle("light");localStorage.setItem("atlasTheme",document.documentElement.classList.contains("light")?"light":"dark")};
 if(localStorage.getItem("atlasTheme")==="light")document.documentElement.classList.add("light");
-$("#exportBtn").onclick=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="ATLAS-0.6.3-backup.json";a.click();URL.revokeObjectURL(a.href)};
+$("#exportBtn").onclick=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="ATLAS-0.6.4-backup.json";a.click();URL.revokeObjectURL(a.href)};
 $("#importInput").onchange=async e=>{const f=e.target.files[0];if(!f)return;try{data=normalize(JSON.parse(await f.text()));save();go("home");toast("Backup imported")}catch{alert("That file is not valid ATLAS JSON.")}};
 greet();renderNav();render();loadDocs();
+if(brainPassword())setTimeout(()=>atlasSyncNow({silent:true}),350);
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&brainPassword())scheduleAtlasSync(250)});
+window.addEventListener("focus",()=>{if(brainPassword())scheduleAtlasSync(300)});
 </script>
 </body>
 </html>
