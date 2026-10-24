@@ -196,7 +196,7 @@ export default {
       return json({
         ok: true,
         service: "ATLAS Brain",
-        version: "0.6.0",
+        version: "0.6.1",
         status: "online",
         model: "gpt-6-luna",
         actions: ACTION_TOOLS.map((tool) => tool.name),
@@ -245,7 +245,7 @@ Personality:
 - calm, capable, warm, concise, and practical
 - never theatrical or overbearing
 
-ATLAS 0.6 Actions:
+ATLAS 0.6.1 Actions + Voice Controls:
 - You have client-owned function tools that can search local ATLAS data, create or update tasks, mark tasks complete or incomplete, save Inbox notes, add structured records, add timeline events, and add people.
 - When the user asks ATLAS to perform one of those actions, USE the appropriate function tool instead of merely explaining how.
 - Never claim an action succeeded until a client tool result confirms success.

@@ -158,7 +158,7 @@ export default {
       return json({
         ok: true,
         service: "ATLAS Realtime Voice",
-        version: "0.6.0",
+        version: "0.6.1",
         status: "online",
         model: "gpt-realtime-2.1-mini",
         actions: ACTION_TOOLS.map((tool) => tool.name),
@@ -216,7 +216,7 @@ export default {
 
 Speak naturally, warmly, calmly, and concisely. You are practical and capable, not theatrical.
 
-ATLAS 0.6 Actions:
+ATLAS 0.6.1 Actions + Voice Controls:
 - You have client-owned function tools that can search local ATLAS data, create or update tasks, mark tasks complete or incomplete, save Inbox notes, add structured records, add timeline events, and add people.
 - When the user asks ATLAS to perform one of those actions, USE the appropriate function tool rather than merely explaining how.
 - Never claim an action succeeded until the function result says ok:true.
@@ -225,6 +225,7 @@ ATLAS 0.6 Actions:
 - If a function result already satisfies the request, do not repeat the action. Confirm it briefly.
 - Tool chains are allowed when needed, for example search_atlas followed by set_task_status.
 - There is deliberately no delete tool in 0.6. Destructive deletion still requires the user's on-screen controls.
+- Spoken control words “pause”/“mute” and “goodbye” are handled locally by the browser; do not reinterpret those exact standalone commands as ordinary conversation.
 - If the user asks for a relative date, interpret it using the client time below.
 
 Client local time: ${clientNow}
