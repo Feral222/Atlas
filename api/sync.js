@@ -205,7 +205,7 @@ function clientState(state) {
   return { data, chat, customCategories };
 }
 async function performSync(payload) {
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 6; attempt++) {
     const loaded = await loadState();
     const state = loaded.state;
     const now = new Date().toISOString();
@@ -220,7 +220,10 @@ async function performSync(payload) {
       } catch (error) {
         const name = String(error?.name || "");
         const msg = String(error?.message || "");
-        if ((name.includes("Precondition") || msg.includes("precondition") || msg.includes("412")) && attempt < 2) continue;
+        if ((name.includes("Precondition") || msg.toLowerCase().includes("precondition") || msg.includes("412")) && attempt < 5) {
+          await new Promise(resolve => setTimeout(resolve, 120 * (attempt + 1)));
+          continue;
+        }
         throw error;
       }
     }
