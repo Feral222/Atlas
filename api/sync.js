@@ -1,4 +1,4 @@
-import { get, put } from "@vercel/blob";
+import { get, head, put } from "@vercel/blob";
 import { createHash, createCipheriv, createDecipheriv, randomBytes, timingSafeEqual } from "node:crypto";
 
 const VERSION = "0.6.4";
@@ -91,7 +91,9 @@ async function loadState() {
   const result = await get(PATHNAME, { access: "private", useCache: false });
   if (!result || result.statusCode !== 200 || !result.stream) return { state: blankState(), exists: false, etag: "" };
   const text = await new Response(result.stream).text();
-  return { state: normalizeState(decryptObject(text)), exists: true, etag: result.blob?.etag || "" };
+  const metadata = await head(PATHNAME);
+  if (!metadata?.etag) throw new Error("ATLAS sync: missing authoritative blob ETag.");
+  return { state: normalizeState(decryptObject(text)), exists: true, etag: metadata.etag };
 }
 async function saveState(state, etag = "") {
   const options = {
