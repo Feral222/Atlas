@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ATLAS">
-<title>ATLAS 0.5.0 — Voice</title>
+<title>ATLAS 0.6.0 — Actions</title>
 <style>
 :root{--bg:#07111c;--panel:#0d1b2a;--panel2:#122337;--text:#eef4fb;--muted:#9fb0c2;--gold:#d6b66b;--gold2:#f1d78e;--line:rgba(255,255,255,.08);--shadow:0 18px 50px rgba(0,0,0,.28);--ok:#5fc58a;--danger:#e46d6d;--warn:#e0ad5d}
 :root.light{--bg:#eef2f7;--panel:#fff;--panel2:#f6f8fb;--text:#132235;--muted:#66788d;--gold:#9a7625;--gold2:#c49a3c;--line:rgba(19,34,53,.10);--shadow:0 18px 50px rgba(34,55,80,.12)}
@@ -93,7 +93,7 @@ box-shadow:0 0 0 1px rgba(241,215,142,.48),0 0 34px rgba(98,217,255,.26),inset 0
 </head>
 <body>
 <aside class="sidebar" id="sidebar">
-  <div class="brand"><div class="brand-mark">A</div><div><h1>ATLAS</h1><p>Advanced Tracking, Library & Archival System</p><span class="version">0.5.0 • Voice</span></div></div>
+  <div class="brand"><div class="brand-mark">A</div><div><h1>ATLAS</h1><p>Advanced Tracking, Library & Archival System</p><span class="version">0.6.0 • Actions</span></div></div>
   <nav id="desktopNav" class="nav-list"></nav>
   <div class="sidebar-footer">
     <button class="ghost-btn" id="exportBtn">Export backup</button>
@@ -104,7 +104,7 @@ box-shadow:0 0 0 1px rgba(241,215,142,.48),0 0 34px rgba(98,217,255,.26),inset 0
   <header class="topbar"><button class="icon-btn mobile-only" id="menuBtn">☰</button><div><div class="eyebrow" id="greeting"></div><h2 id="pageTitle">Command Center</h2></div><button class="icon-btn" id="themeBtn">◐</button></header>
   <section class="hero">
     <div class="search-wrap"><span>⌕</span><input id="globalSearch" placeholder="Search tasks, notes, records, documents, people and events…" autocomplete="off"></div>
-    <div class="voice-card"><button id="micBtn" class="mic-btn">🎤</button><div><div class="voice-title">Quick Voice Command</div><div id="voiceStatus" class="voice-status">Tap the microphone for simple commands. Full conversational voice is the next stage.</div></div><button id="runCommandBtn" class="primary-btn">Run Command</button></div>
+    <div class="voice-card"><button id="micBtn" class="mic-btn">🎤</button><div><div class="voice-title">Quick Voice Command</div><div id="voiceStatus" class="voice-status">Tap for a quick command. For live conversation and action tools, open ATLAS Brain.</div></div><button id="runCommandBtn" class="primary-btn">Run Command</button></div>
     <textarea id="commandInput" rows="2" placeholder='Try: “Atlas, add a task to call the mechanic”'></textarea>
   </section>
   <section id="content"></section>
@@ -113,20 +113,21 @@ box-shadow:0 0 0 1px rgba(241,215,142,.48),0 0 34px rgba(98,217,255,.26),inset 0
 <div id="toast" class="toast"></div>
 
 <script>
-const VERSION="0.5.0";
+const VERSION="0.6.0";
 const NAV=[["home","⌂","Home"],["atlas","✦","ATLAS Brain"],["inbox","✉","Inbox"],["actions","✓","Action Center"],["library","🗂","Library"],["timeline","◷","Timeline"],["medical","✚","Medical"],["legal","⚖","Legal"],["housing","⌂","Housing"],["finance","$","Finance"],["vehicles","🚗","Vehicles"],["pets","🐈","Pets"],["people","👥","People"],["knowledge","📚","Knowledge"],["settings","⚙","Settings"]];
 const AREAS=["General","Medical","Legal","Housing","Finance","Vehicles","Pets","People","Knowledge"];
 const defaults={version:3,tasks:[{id:"seed1",title:"Follow up on BMW claim",done:false,area:"Legal",due:"",priority:"high"},{id:"seed2",title:"Review LADWP payment arrangement",done:false,area:"Housing",due:"",priority:"medium"},{id:"seed3",title:"Track kitten vaccinations",done:false,area:"Pets",due:"",priority:"medium"}],notes:[],events:[{id:"event1",date:"2026-05-03",title:"BMW collision",area:"Vehicles",details:"Rear collision; vehicle became undrivable."}],people:[{id:"p1",name:"Luis",relationship:"Partner",notes:"Household member"},{id:"p2",name:"Gerardo Zaldivar",relationship:"LACDA caseworker",notes:"Housing contact"}],records:[],sections:{medical:["Providers","Medications","Lab results","Procedures","Insurance"],legal:["Active matters","Evidence","Correspondence","Deadlines","Contacts"],housing:["Lease","LACDA","Utilities","Repairs","Inspections"],finance:["Banking","Bills","Benefits","Receipts","Taxes"],vehicles:["BMW","E-bikes","Scooter","Insurance","Maintenance"],pets:["Profiles","Vaccinations","Vet records","Photos","Medications"],knowledge:["Reference notes","Research","How-to guides","Important records"]}};
 const $=s=>document.querySelector(s),content=$("#content"),pageTitle=$("#pageTitle"),commandInput=$("#commandInput"),micBtn=$("#micBtn"),voiceStatus=$("#voiceStatus");
-const ATLAS_API_URL="https://atlas-three-ochre.vercel.app/api/chat";
-const ATLAS_REALTIME_URL="https://atlas-three-ochre.vercel.app/api/realtime";
+const ATLAS_BACKEND_ORIGIN=location.hostname.endsWith(".vercel.app")?location.origin:"https://atlas-three-ochre.vercel.app";
+const ATLAS_API_URL=ATLAS_BACKEND_ORIGIN+"/api/chat";
+const ATLAS_REALTIME_URL=ATLAS_BACKEND_ORIGIN+"/api/realtime";
 let currentPage="home",docs=[],editingTaskId=null,atlasSending=false,
 customCategories=JSON.parse(localStorage.getItem("atlasCustomCategories")||"[]"),
 atlasChat=JSON.parse(localStorage.getItem("atlasChatV1")||"[]");
 let atlasVoice={
   pc:null,dc:null,stream:null,audio:null,
   active:false,connecting:false,muted:false,status:"idle",
-  voice:localStorage.getItem("atlasVoiceName")||"marin"
+  voice:localStorage.getItem("atlasVoiceName")||"cedar"
 };
 function clone(o){return JSON.parse(JSON.stringify(o))}
 function normalize(raw){const b=clone(defaults);raw=raw&&typeof raw==="object"?raw:{};return{version:3,tasks:Array.isArray(raw.tasks)?raw.tasks.map(t=>({id:String(t.id||uid()),title:String(t.title||"Untitled task"),done:!!t.done,area:t.area||"General",due:t.due||"",priority:t.priority||"medium"})):b.tasks,notes:Array.isArray(raw.notes)?raw.notes:[],events:Array.isArray(raw.events)?raw.events:[],people:Array.isArray(raw.people)?raw.people:[],records:Array.isArray(raw.records)?raw.records:[],sections:raw.sections||b.sections}}
@@ -148,7 +149,7 @@ function go(p){if(p!=="actions")editingTaskId=null;currentPage=p;$("#sidebar").c
 function greet(){const h=new Date().getHours();$("#greeting").textContent=(h<12?"Good morning":h<18?"Good afternoon":"Good evening")+" • ATLAS "+VERSION}
 function taskList(ts){if(!ts.length)return`<div class="empty">Nothing here yet.</div>`;return`<div class="list">${ts.map(t=>`<div class="list-item ${t.done?"done":""}"><button class="task-check ${t.done?"checked":""}" data-task-check="${esc(t.id)}" aria-label="${t.done?"Mark task incomplete":"Mark task completed"}"></button><div><div class="item-title">${esc(t.title)}</div><span class="pill">${esc(t.area)}</span><span class="pill ${esc(t.priority)}">${esc(t.priority)}</span>${t.due?`<span class="pill">${esc(fmt(t.due))}</span>`:""}</div><select class="task-action" data-task-action="${esc(t.id)}"><option value="" selected>Task actions…</option><option value="edit">Edit</option><option value="${t.done?"incomplete":"complete"}">${t.done?"Mark Incomplete":"Mark Completed"}</option><option value="delete">Delete</option></select></div>`).join("")}</div>`}
 function timelineList(ev){if(!ev.length)return`<div class="empty">No events yet.</div>`;return`<div class="card timeline">${ev.map(e=>`<div class="timeline-item"><strong>${esc(e.title)}</strong><div class="muted">${esc(fmt(e.date))} • ${esc(e.area||"General")}</div>${e.details?`<div class="record-body">${esc(e.details)}</div>`:""}<button class="small-btn" data-event-delete="${esc(e.id)}">Delete</button></div>`).join("")}</div>`}
-function dashboard(){const p={high:0,medium:1,low:2};const open=[...data.tasks].filter(t=>!t.done).sort((a,b)=>(p[a.priority]??1)-(p[b.priority]??1));const quickIds=["library","timeline","medical","legal","housing","finance","vehicles","pets","people","knowledge"];return`<div class="card brain-launch"><div class="brain-launch-inner"><div class="atlas-orb"><span class="atlas-orb-glyph">A</span></div><div><div class="brain-kicker">ATLAS 0.5 • Voice</div><div class="brain-title">Your private ATLAS intelligence can now speak.</div><div class="brain-copy">Open ATLAS Brain for text chat or start a live, two-way spoken conversation. Action tools are the next layer.</div></div><button class="primary-btn" data-open="atlas">Open ATLAS</button></div></div><div class="mythic-divider"></div><div class="grid cols-4"><div class="card"><h3>Open tasks</h3><div class="big">${open.length}</div><div class="muted">Across ATLAS</div></div><div class="card"><h3>Inbox</h3><div class="big">${data.notes.length}</div><div class="muted">Notes and captures</div></div><div class="card"><h3>Records</h3><div class="big">${data.records.length}</div><div class="muted">Structured records</div></div><div class="card"><h3>Documents</h3><div class="big">${docs.length}</div><div class="muted">Stored on this device</div></div></div><div class="section-title"><h3>Quick access</h3></div><div class="grid cols-4">${quickIds.map(id=>NAV.find(n=>n[0]===id)).filter(Boolean).map(([id,ic,l])=>`<button class="quick-card" data-open="${id}"><span class="quick-icon">${ic}</span><span><strong>${l}</strong><br><small class="muted">Open workspace</small></span></button>`).join("")}</div><div class="section-title"><h3>Priority tasks</h3><button class="small-btn" data-open="actions">View all</button></div>${taskList(open.slice(0,6))}<div class="section-title"><h3>Recent timeline</h3><button class="small-btn" data-open="timeline">Open timeline</button></div>${timelineList([...data.events].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,4))}`}
+function dashboard(){const p={high:0,medium:1,low:2};const open=[...data.tasks].filter(t=>!t.done).sort((a,b)=>(p[a.priority]??1)-(p[b.priority]??1));const quickIds=["library","timeline","medical","legal","housing","finance","vehicles","pets","people","knowledge"];return`<div class="card brain-launch"><div class="brain-launch-inner"><div class="atlas-orb"><span class="atlas-orb-glyph">A</span></div><div><div class="brain-kicker">ATLAS 0.6 • Actions</div><div class="brain-title">Your private ATLAS intelligence can now act.</div><div class="brain-copy">Ask ATLAS to create and update tasks, save notes and records, search your data, or use live voice to do the same.</div></div><button class="primary-btn" data-open="atlas">Open ATLAS</button></div></div><div class="mythic-divider"></div><div class="grid cols-4"><div class="card"><h3>Open tasks</h3><div class="big">${open.length}</div><div class="muted">Across ATLAS</div></div><div class="card"><h3>Inbox</h3><div class="big">${data.notes.length}</div><div class="muted">Notes and captures</div></div><div class="card"><h3>Records</h3><div class="big">${data.records.length}</div><div class="muted">Structured records</div></div><div class="card"><h3>Documents</h3><div class="big">${docs.length}</div><div class="muted">Stored on this device</div></div></div><div class="section-title"><h3>Quick access</h3></div><div class="grid cols-4">${quickIds.map(id=>NAV.find(n=>n[0]===id)).filter(Boolean).map(([id,ic,l])=>`<button class="quick-card" data-open="${id}"><span class="quick-icon">${ic}</span><span><strong>${l}</strong><br><small class="muted">Open workspace</small></span></button>`).join("")}</div><div class="section-title"><h3>Priority tasks</h3><button class="small-btn" data-open="actions">View all</button></div>${taskList(open.slice(0,6))}<div class="section-title"><h3>Recent timeline</h3><button class="small-btn" data-open="timeline">Open timeline</button></div>${timelineList([...data.events].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,4))}`}
 function inbox(){return`<div class="card"><h3>Quick capture</h3><textarea id="noteInput" rows="4" placeholder="Capture something now. Sort it later."></textarea><div style="margin-top:10px"><button class="primary-btn" id="saveNoteBtn">Save to Inbox</button></div></div><div class="section-title"><h3>Inbox items</h3></div><div class="list">${data.notes.length?data.notes.map(n=>`<div class="list-item"><div>📝</div><div><div class="item-title">${esc(n.text)}</div><small class="muted">${new Date(n.created).toLocaleString()}</small></div><button class="small-btn" data-note-delete="${esc(n.id)}">Delete</button></div>`).join(""):`<div class="empty">Your Inbox is empty.</div>`}</div>`}
 function actions(){
 const e=editingTaskId?data.tasks.find(t=>t.id===editingTaskId):null;
@@ -167,6 +168,120 @@ function recordsFor(area){return data.records.filter(r=>String(r.area||"").toLow
 function recordCards(rs){if(!rs.length)return`<div class="empty">No records added yet.</div>`;return`<div class="grid cols-2">${rs.map(r=>`<article class="card"><div class="kicker">${esc(r.type||"Record")}</div><h3>${esc(r.title||"Untitled")}</h3><div>${r.date?`<span class="pill">${esc(fmt(r.date))}</span>`:""}${(r.tags||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join("")}</div><div class="record-body">${esc(r.details||"")}</div><div style="margin-top:12px"><button class="small-btn" data-record-delete="${esc(r.id)}">Delete</button></div></article>`).join("")}</div>`}
 function sectionPage(p){const area=p[0].toUpperCase()+p.slice(1),types=data.sections[p]||["General"],rd=docs.filter(d=>String(d.area||"").toLowerCase()===p),re=data.events.filter(e=>String(e.area||"").toLowerCase()===p);return`<div class="card"><h3>Add ${esc(area)} record</h3><div class="form-grid"><input id="recordTitle" class="wide" placeholder="Record title"><select id="recordType">${types.map(t=>`<option>${esc(t)}</option>`).join("")}</select><input id="recordDate" type="date"><input id="recordTags" class="wide" placeholder="Tags, comma separated"><textarea id="recordDetails" class="wide" placeholder="Details, notes, numbers, names, or anything you want to remember"></textarea><button class="primary-btn wide" id="addRecordBtn" data-area="${esc(area)}">Save record</button></div></div><div class="section-title"><h3>${esc(area)} records</h3><span class="pill">${recordsFor(area).length}</span></div>${recordCards(recordsFor(area))}<div class="section-title"><h3>Related tasks</h3></div>${taskList(data.tasks.filter(t=>String(t.area||"").toLowerCase()===p))}<div class="section-title"><h3>Related documents</h3><span class="pill">${rd.length}</span></div>${rd.length?`<div class="list">${rd.map(d=>`<div class="list-item"><div>📄</div><div>${esc(d.name)}</div><button class="small-btn" data-doc-open="${esc(d.id)}">Open</button></div>`).join("")}</div>`:`<div class="empty">No related documents yet.</div>`}<div class="section-title"><h3>Related timeline events</h3></div>${timelineList([...re].sort((a,b)=>b.date.localeCompare(a.date)))}`}
 
+
+function atlasClientContext(){
+  return {
+    now:new Date().toISOString(),
+    timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||"",
+    categories:allCategories()
+  };
+}
+function safeAtlasArgs(args){
+  if(args&&typeof args==="object")return args;
+  if(typeof args==="string"){try{return JSON.parse(args)}catch{return {}}}
+  return {};
+}
+async function executeAtlasTool(name,args){
+  args=safeAtlasArgs(args);
+  const clean=v=>String(v??"").trim();
+  const validDate=v=>/^\d{4}-\d{2}-\d{2}$/.test(clean(v))?clean(v):"";
+  const priority=v=>["high","medium","low"].includes(clean(v).toLowerCase())?clean(v).toLowerCase():"medium";
+  const category=v=>{
+    const wanted=clean(v)||"General";
+    const existing=allCategories().find(x=>x.toLowerCase()===wanted.toLowerCase());
+    if(existing)return existing;
+    customCategories.push(wanted);
+    localStorage.setItem("atlasCustomCategories",JSON.stringify(customCategories));
+    return wanted;
+  };
+
+  if(name==="create_task"){
+    const title=clean(args.title);if(!title)return {ok:false,error:"Task title is required."};
+    const task={id:uid("task"),title,done:false,area:category(args.area),due:validDate(args.due),priority:priority(args.priority)};
+    data.tasks.unshift(task);save();toast("Task added: "+task.title);
+    return {ok:true,action:"created_task",task};
+  }
+  if(name==="update_task"){
+    const t=data.tasks.find(x=>x.id===clean(args.task_id));
+    if(!t)return {ok:false,error:"Task not found. Use search_atlas first to get the task ID."};
+    if(args.title!==undefined&&clean(args.title))t.title=clean(args.title);
+    if(args.area!==undefined&&clean(args.area))t.area=category(args.area);
+    if(args.due!==undefined)t.due=validDate(args.due);
+    if(args.priority!==undefined)t.priority=priority(args.priority);
+    save();toast("Task updated: "+t.title);
+    return {ok:true,action:"updated_task",task:t};
+  }
+  if(name==="set_task_status"){
+    const t=data.tasks.find(x=>x.id===clean(args.task_id));
+    if(!t)return {ok:false,error:"Task not found. Use search_atlas first to get the task ID."};
+    t.done=!!args.completed;save();toast((t.done?"Completed: ":"Reopened: ")+t.title);
+    return {ok:true,action:t.done?"completed_task":"reopened_task",task:t};
+  }
+  if(name==="create_note"){
+    const text=clean(args.text);if(!text)return {ok:false,error:"Note text is required."};
+    const note={id:uid("note"),text,created:new Date().toISOString()};
+    data.notes.unshift(note);save();toast("Saved to Inbox");
+    return {ok:true,action:"created_note",note};
+  }
+  if(name==="create_timeline_event"){
+    const title=clean(args.title),date=validDate(args.date);
+    if(!title||!date)return {ok:false,error:"Timeline event needs a title and YYYY-MM-DD date."};
+    const event={id:uid("event"),title,date,area:category(args.area),details:clean(args.details)};
+    data.events.push(event);save();toast("Timeline event added: "+title);
+    return {ok:true,action:"created_timeline_event",event};
+  }
+  if(name==="create_record"){
+    const title=clean(args.title);if(!title)return {ok:false,error:"Record title is required."};
+    const tags=Array.isArray(args.tags)?args.tags.map(clean).filter(Boolean):clean(args.tags).split(",").map(x=>x.trim()).filter(Boolean);
+    const record={id:uid("record"),title,area:category(args.area),type:clean(args.type)||"General",date:validDate(args.date),tags,details:clean(args.details),created:new Date().toISOString()};
+    data.records.unshift(record);save();toast("Record saved: "+title);
+    return {ok:true,action:"created_record",record};
+  }
+  if(name==="create_person"){
+    const personName=clean(args.name);if(!personName)return {ok:false,error:"Person name is required."};
+    const person={id:uid("person"),name:personName,relationship:clean(args.relationship),notes:clean(args.notes)};
+    data.people.push(person);save();toast("Person added: "+personName);
+    return {ok:true,action:"created_person",person};
+  }
+  if(name==="search_atlas"){
+    const q=clean(args.query).toLowerCase();if(!q)return {ok:false,error:"Search query is required."};
+    const scope=clean(args.scope).toLowerCase()||"all";
+    const hit=v=>String(v??"").toLowerCase().includes(q);
+    const out={query:q,scope};
+    if(scope==="all"||scope==="tasks")out.tasks=data.tasks.filter(t=>hit([t.title,t.area,t.priority,t.due].join(" "))).slice(0,25);
+    if(scope==="all"||scope==="notes")out.notes=data.notes.filter(n=>hit(n.text)).slice(0,25);
+    if(scope==="all"||scope==="events")out.events=data.events.filter(e=>hit([e.title,e.area,e.details,e.date].join(" "))).slice(0,25);
+    if(scope==="all"||scope==="records")out.records=data.records.filter(r=>hit([r.title,r.area,r.type,r.details,(r.tags||[]).join(" ")].join(" "))).slice(0,25);
+    if(scope==="all"||scope==="people")out.people=data.people.filter(p=>hit([p.name,p.relationship,p.notes].join(" "))).slice(0,25);
+    if(scope==="all"||scope==="documents")out.documents=docs.filter(d=>hit([d.name,d.area,(d.tags||[]).join(" ")].join(" "))).slice(0,25).map(d=>({id:d.id,name:d.name,area:d.area,tags:d.tags,type:d.type,created:d.created}));
+    return {ok:true,action:"search_results",results:out};
+  }
+  return {ok:false,error:"Unknown ATLAS action tool: "+name};
+}
+async function handleRealtimeToolCalls(calls){
+  if(!Array.isArray(calls)||!calls.length||!atlasVoice.dc)return;
+  setVoiceStatus("thinking");
+  for(const call of calls){
+    let result;
+    try{result=await executeAtlasTool(call.name,call.arguments)}
+    catch(err){result={ok:false,error:err.message||String(err)}}
+    atlasVoice.dc.send(JSON.stringify({
+      type:"conversation.item.create",
+      item:{type:"function_call_output",call_id:call.call_id,output:JSON.stringify(result)}
+    }));
+  }
+  atlasVoice.dc.send(JSON.stringify({type:"response.create"}));
+}
+async function handleRealtimeResponseDone(event){
+  if(event?.response?.status!=="completed"){
+    if(atlasVoice.active)setVoiceStatus("listening");
+    return;
+  }
+  const calls=(event.response.output||[]).filter(x=>x?.type==="function_call"&&x.call_id&&x.name);
+  if(calls.length){await handleRealtimeToolCalls(calls);return}
+  if(atlasVoice.active)setVoiceStatus("listening");
+}
+
 function saveAtlasChat(){localStorage.setItem("atlasChatV1",JSON.stringify(atlasChat.slice(-40)))}
 function brainPassword(){return localStorage.getItem("atlasBrainPassword")||""}
 function atlasChatPage(){
@@ -180,9 +295,9 @@ function atlasChatPage(){
       <div class="brain-head-grid">
         <div class="atlas-orb"><span class="atlas-orb-glyph">A</span></div>
         <div>
-          <div class="brain-kicker">Private AI Core • Voice Stage</div>
+          <div class="brain-kicker">Private AI Core • Action Stage</div>
           <div class="brain-title">ATLAS Brain</div>
-          <div class="brain-copy">Text conversation plus a live speech-to-speech ATLAS voice session. Your permanent OpenAI key stays protected on Vercel.</div>
+          <div class="brain-copy">Text and Cedar voice can now use safe local action tools. Your permanent OpenAI key stays protected on Vercel.</div>
         </div>
         <span class="brain-status">${unlocked?"Unlocked":"Locked"}</span>
       </div>
@@ -193,7 +308,7 @@ function atlasChatPage(){
         <div class="voice-orb ${orbState}" id="atlasVoiceOrb"><span class="atlas-orb-glyph">A</span></div>
         <div>
           <div class="voice-title-row"><div><div class="brain-kicker">Realtime speech-to-speech</div><div class="voice-live-title">Talk naturally with ATLAS</div></div><span class="pill">GPT-Realtime 2.1 Mini</span></div>
-          <div class="voice-live-copy">Start a session, then simply speak. ATLAS listens, detects when you finish, answers aloud, and lets you interrupt naturally.</div>
+          <div class="voice-live-copy">Start a session and speak naturally. ATLAS can now search your local data and create or update ATLAS items while you talk.</div>
           <div class="voice-status-line"><span class="voice-dot ${atlasVoice.active?"live":atlasVoice.connecting?"busy":""}" id="atlasVoiceDot"></span><span id="atlasVoiceStatus">${voiceStatus}</span>${atlasVoice.muted?`<span class="pill">Muted</span>`:""}</div>
         </div>
       </div>
@@ -202,12 +317,12 @@ function atlasChatPage(){
         <button class="small-btn" id="atlasMuteBtn" ${atlasVoice.active?"":"disabled"}>${atlasVoice.muted?"Unmute":"Mute"}</button>
         <button class="${atlasVoice.active?"small-btn voice-btn-end":"voice-btn-live"}" id="atlasVoiceBtn" ${atlasVoice.connecting?"disabled":""}>${atlasVoice.active?"End Voice":"Start Voice"}</button>
       </div>
-      <div class="voice-note">Voice choice is locked once a session begins. Marin and Cedar are recommended for best quality. Voice sessions use your API balance.</div>
+      <div class="voice-note">Voice choice is locked once a session begins. Cedar is your ATLAS default. Voice sessions use your OpenAI API balance.</div>
     </div>
-    <div class="brain-tools"><div class="brain-tools-left"><span class="pill">Text brain: online</span><span class="pill">Model: GPT-6 Luna</span></div><div class="brain-tools-right"><button class="small-btn" id="atlasClearBtn">Clear conversation</button><button class="small-btn" id="atlasForgetBtn">Forget password</button></div></div>
+    <div class="brain-tools"><div class="brain-tools-left"><span class="pill">Text brain: online</span><span class="pill">Actions: live</span><span class="pill">Model: GPT-6 Luna</span></div><div class="brain-tools-right"><button class="small-btn" id="atlasClearBtn">Clear conversation</button><button class="small-btn" id="atlasForgetBtn">Forget password</button></div></div>
     <div class="chat-window" id="atlasChatWindow">${msgs.length?msgs.map(m=>`<div class="chat-msg ${m.role==="user"?"user":"assistant"}"><div class="chat-bubble"><div class="chat-role">${m.role==="user"?"You":"ATLAS"}</div>${esc(m.content)}</div></div>`).join(""):`<div class="chat-empty"><div><div class="atlas-orb" style="margin:0 auto 18px"><span class="atlas-orb-glyph">A</span></div><strong>ATLAS is ready.</strong><p>Type a message or start a live voice conversation.</p></div></div>`}${atlasSending?`<div class="chat-msg assistant"><div class="chat-bubble"><div class="chat-role">ATLAS</div><span class="thinking-dots"><i></i><i></i><i></i></span></div></div>`:""}</div>
     <div class="chat-compose"><textarea id="atlasMessage" placeholder="Message ATLAS…" ${atlasSending?"disabled":""}></textarea><button class="small-btn" id="atlasDictateBtn" ${atlasSending?"disabled":""}>🎙 Dictate</button><button class="primary-btn" id="atlasSendBtn" ${atlasSending?"disabled":""}>Send</button></div>
-    <div class="muted" style="font-size:12px">Dictate converts one spoken message to text. Start Voice opens the continuous two-way conversation.</div>`}
+    <div class="muted" style="font-size:12px">Dictate converts one spoken message to text. Start Voice opens continuous conversation with ATLAS action tools.</div>`}
   </div>`
 }
 
@@ -253,17 +368,18 @@ function handleRealtimeEvent(event){
   if(event.type==="response.output_audio_transcript.delta"||event.type==="response.output_audio.delta"){setVoiceStatus("speaking");return}
   if(event.type==="response.output_audio_transcript.done"){appendAtlasTranscript("assistant",event.transcript);return}
   if(event.type==="conversation.item.input_audio_transcription.completed"){appendAtlasTranscript("user",event.transcript);return}
-  if(event.type==="response.output_audio.done"||event.type==="response.done"){if(atlasVoice.active)setVoiceStatus("listening");return}
+  if(event.type==="response.done"){handleRealtimeResponseDone(event);return}
+  if(event.type==="response.output_audio.done"){return}
   if(event.type==="error"){console.error("ATLAS realtime error",event);toast(event.error?.message||"ATLAS voice error");return}
 }
 async function startAtlasVoice(){
   if(atlasVoice.active||atlasVoice.connecting)return;
   const password=brainPassword();if(!password){toast("Unlock ATLAS first");return}
-  const selected=$("#atlasVoiceSelect")?.value||atlasVoice.voice||"marin";
+  const selected=$("#atlasVoiceSelect")?.value||atlasVoice.voice||"cedar";
   atlasVoice.voice=selected;localStorage.setItem("atlasVoiceName",selected);
   atlasVoice.connecting=true;setVoiceStatus("connecting");
   try{
-    const tokenRes=await fetch(ATLAS_REALTIME_URL,{method:"POST",headers:{"Content-Type":"application/json","X-Atlas-Password":password},body:JSON.stringify({voice:selected})});
+    const tokenRes=await fetch(ATLAS_REALTIME_URL,{method:"POST",headers:{"Content-Type":"application/json","X-Atlas-Password":password},body:JSON.stringify({voice:selected,client_now:new Date().toISOString(),timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||""})});
     const tokenBody=await tokenRes.json().catch(()=>({}));
     if(tokenRes.status===401){localStorage.removeItem("atlasBrainPassword");throw new Error("Your ATLAS access password was rejected.")}
     if(!tokenRes.ok||!tokenBody.value)throw new Error(tokenBody.detail||tokenBody.error||`Voice token request failed (${tokenRes.status}).`);
@@ -308,29 +424,47 @@ async function sendAtlasMessage(){
   if(!message||!password)return;
   const history=atlasChat.slice(-12).map(m=>({role:m.role,content:m.content}));
   atlasChat.push({role:"user",content:message,at:new Date().toISOString()});
-  saveAtlasChat();
-  atlasSending=true;
-  render();
-  try{
+  saveAtlasChat();atlasSending=true;render();
+
+  const callApi=async payload=>{
     const res=await fetch(ATLAS_API_URL,{
       method:"POST",
       headers:{"Content-Type":"application/json","X-Atlas-Password":password},
-      body:JSON.stringify({message,history})
+      body:JSON.stringify(payload)
     });
     const body=await res.json().catch(()=>({}));
     if(res.status===401){
       localStorage.removeItem("atlasBrainPassword");
       throw new Error("That ATLAS access password was rejected. Please unlock ATLAS again.");
     }
-    if(!res.ok)throw new Error(body.detail||body.error||`ATLAS server returned ${res.status}.`);
-    atlasChat.push({role:"assistant",content:body.reply||"I received an empty response.",at:new Date().toISOString()});
+    if(!res.ok)throw new Error(body.detail||body.error||("ATLAS server returned "+res.status+"."));
+    return body;
+  };
+
+  try{
+    let body=await callApi({message,history,client_context:atlasClientContext()});
+    let rounds=0;
+    while(Array.isArray(body.action_calls)&&body.action_calls.length&&rounds<5){
+      const tool_results=[];
+      for(const call of body.action_calls){
+        let result;
+        try{result=await executeAtlasTool(call.name,call.arguments)}
+        catch(err){result={ok:false,error:err.message||String(err)}}
+        tool_results.push({call_id:call.call_id||"",name:call.name,result});
+      }
+      rounds++;
+      body=await callApi({message,history,client_context:atlasClientContext(),tool_results,action_round:rounds});
+    }
+    if(Array.isArray(body.action_calls)&&body.action_calls.length){
+      throw new Error("ATLAS stopped an unusually long action chain for safety. Please try the request again more specifically.");
+    }
+    atlasChat.push({role:"assistant",content:body.reply||"The ATLAS action completed.",at:new Date().toISOString()});
     saveAtlasChat();
   }catch(err){
-    atlasChat.push({role:"assistant",content:`Connection error: ${err.message}`,at:new Date().toISOString()});
+    atlasChat.push({role:"assistant",content:"Connection error: "+err.message,at:new Date().toISOString()});
     saveAtlasChat();
   }finally{
-    atlasSending=false;
-    render();
+    atlasSending=false;render();
     setTimeout(()=>{const w=$("#atlasChatWindow");if(w)w.scrollTop=w.scrollHeight},40);
   }
 }
@@ -346,7 +480,7 @@ function startAtlasDictation(){
   r.onend=()=>{box.placeholder=old;box.focus()};
   r.start();
 }
-function settings(){return`<div class="grid cols-2"><div class="card"><h3>Version</h3><div class="big">0.5.0</div><p class="muted">Voice — realtime speech-to-speech stage.</p></div><div class="card"><h3>ATLAS Brain + Voice</h3><p class="badge-ok">Secure text and Realtime backends online through Vercel.</p><p class="muted">Your OpenAI API key remains server-side. This device stores only your temporary ATLAS access password and local conversation history.</p><button class="small-btn" data-open="atlas">Open ATLAS Brain</button></div><div class="card"><h3>Local storage</h3><p class="muted">Tasks, notes, records, events, people and ATLAS chat history are stored in this browser. Uploaded files use IndexedDB.</p></div><div class="card"><h3>Backup</h3><p class="muted">Use Export backup in the menu to save your ATLAS metadata as a JSON file. Chat history is currently separate from that backup.</p></div><div class="card"><h3>Privacy</h3><p class="muted">Text messages are sent through your private ATLAS backend with <strong>store:false</strong>. Live voice uses short-lived Realtime client secrets minted by Vercel; your permanent OpenAI key stays server-side.</p></div><div class="card"><h3>Reset</h3><p class="muted">This resets metadata only; uploaded documents and ATLAS Brain credentials remain unless separately cleared.</p><button class="danger-btn" id="clearDataBtn">Reset metadata</button></div></div>`}
+function settings(){return`<div class="grid cols-2"><div class="card"><h3>Version</h3><div class="big">0.5.0</div><p class="muted">Actions — local tool-calling stage.</p></div><div class="card"><h3>ATLAS Brain + Voice</h3><p class="badge-ok">Secure text, Realtime voice, and client-side action tools online.</p><p class="muted">Your OpenAI API key remains server-side. This device stores only your temporary ATLAS access password and local conversation history.</p><button class="small-btn" data-open="atlas">Open ATLAS Brain</button></div><div class="card"><h3>Local storage</h3><p class="muted">Tasks, notes, records, events, people and ATLAS chat history are stored in this browser. Uploaded files use IndexedDB.</p></div><div class="card"><h3>Backup</h3><p class="muted">Use Export backup in the menu to save your ATLAS metadata as a JSON file. Chat history is currently separate from that backup.</p></div><div class="card"><h3>Privacy</h3><p class="muted">Text messages are sent through your private ATLAS backend with <strong>store:false</strong>. Live voice uses short-lived Realtime client secrets minted by Vercel; your permanent OpenAI key stays server-side.</p></div><div class="card"><h3>Reset</h3><p class="muted">This resets metadata only; uploaded documents and ATLAS Brain credentials remain unless separately cleared.</p><button class="danger-btn" id="clearDataBtn">Reset metadata</button></div></div>`}
 function searchResults(q){q=q.toLowerCase().trim();if(!q)return dashboard();const th=data.tasks.filter(t=>(`${t.title} ${t.area} ${t.priority}`).toLowerCase().includes(q)),nh=data.notes.filter(n=>String(n.text||"").toLowerCase().includes(q)),rh=data.records.filter(r=>(`${r.title} ${r.area} ${r.type} ${r.details} ${(r.tags||[]).join(" ")}`).toLowerCase().includes(q)),dh=docs.filter(d=>(`${d.name} ${d.area} ${(d.tags||[]).join(" ")}`).toLowerCase().includes(q)),eh=data.events.filter(e=>(`${e.title} ${e.area} ${e.details}`).toLowerCase().includes(q)),ph=data.people.filter(p=>(`${p.name} ${p.relationship} ${p.notes}`).toLowerCase().includes(q));return`<div class="section-title"><h3>Search results for “${esc(q)}”</h3></div><div class="grid cols-3"><div class="card"><h3>Tasks</h3>${th.length?th.map(t=>`<p>${esc(t.title)}</p>`).join(""):`<p class="muted">No matches</p>`}</div><div class="card"><h3>Records</h3>${rh.length?rh.map(r=>`<p>${esc(r.title)} <span class="pill">${esc(r.area)}</span></p>`).join(""):`<p class="muted">No matches</p>`}</div><div class="card"><h3>Documents</h3>${dh.length?dh.map(d=>`<p>${esc(d.name)}</p>`).join(""):`<p class="muted">No matches</p>`}</div><div class="card"><h3>Timeline</h3>${eh.length?eh.map(e=>`<p>${esc(fmt(e.date))} — ${esc(e.title)}</p>`).join(""):`<p class="muted">No matches</p>`}</div><div class="card"><h3>Inbox</h3>${nh.length?nh.map(n=>`<p>${esc(n.text)}</p>`).join(""):`<p class="muted">No matches</p>`}</div><div class="card"><h3>People</h3>${ph.length?ph.map(p=>`<p>${esc(p.name)} — ${esc(p.relationship)}</p>`).join(""):`<p class="muted">No matches</p>`}</div></div>`}
 function render(){const tm={home:"Command Center",atlas:"ATLAS Brain",inbox:"Inbox",actions:"Action Center",library:"Document Library",timeline:"Timeline",people:"People",settings:"Settings"};pageTitle.textContent=tm[currentPage]||currentPage[0].toUpperCase()+currentPage.slice(1);const hero=document.querySelector(".hero");if(hero)hero.style.display=currentPage==="atlas"?"none":"grid";content.innerHTML=currentPage==="home"?dashboard():currentPage==="atlas"?atlasChatPage():currentPage==="inbox"?inbox():currentPage==="actions"?actions():currentPage==="library"?library():currentPage==="timeline"?timeline():currentPage==="people"?people():currentPage==="settings"?settings():sectionPage(currentPage);bind();if(currentPage==="atlas")setTimeout(()=>{const w=$("#atlasChatWindow");if(w)w.scrollTop=w.scrollHeight;setVoiceStatus(atlasVoice.status)},20)}
 
@@ -419,7 +553,7 @@ $("#globalSearch").addEventListener("input",e=>{pageTitle.textContent=e.target.v
 $("#menuBtn").onclick=()=>$("#sidebar").classList.toggle("open");
 $("#themeBtn").onclick=()=>{document.documentElement.classList.toggle("light");localStorage.setItem("atlasTheme",document.documentElement.classList.contains("light")?"light":"dark")};
 if(localStorage.getItem("atlasTheme")==="light")document.documentElement.classList.add("light");
-$("#exportBtn").onclick=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="ATLAS-0.5-backup.json";a.click();URL.revokeObjectURL(a.href)};
+$("#exportBtn").onclick=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"}),a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="ATLAS-0.6-backup.json";a.click();URL.revokeObjectURL(a.href)};
 $("#importInput").onchange=async e=>{const f=e.target.files[0];if(!f)return;try{data=normalize(JSON.parse(await f.text()));save();go("home");toast("Backup imported")}catch{alert("That file is not valid ATLAS JSON.")}};
 greet();renderNav();render();loadDocs();
 </script>
