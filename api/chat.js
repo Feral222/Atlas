@@ -122,6 +122,10 @@ const ACTION_TOOLS = [
       required: ["name"],
     },
   },
+  { type: "function", name: "update_note", description: "Edit an existing ATLAS item. Search first for the exact item_id; if multiple matches, ask the user to choose.", parameters: { type: "object", properties: { item_id: { type: "string" }, text: { type: "string" } }, required: ["item_id"] } },
+  { type: "function", name: "update_record", description: "Edit an existing ATLAS item. Search first for the exact item_id; if multiple matches, ask the user to choose.", parameters: { type: "object", properties: { item_id: { type: "string" }, title: { type: "string" }, area: { type: "string" }, type: { type: "string" }, date: { type: "string" }, tags: { type: "array", items: { type: "string" } }, details: { type: "string" } }, required: ["item_id"] } },
+  { type: "function", name: "update_person", description: "Edit an existing ATLAS item. Search first for the exact item_id; if multiple matches, ask the user to choose.", parameters: { type: "object", properties: { item_id: { type: "string" }, name: { type: "string" }, relationship: { type: "string" }, notes: { type: "string" } }, required: ["item_id"] } },
+  { type: "function", name: "update_timeline_event", description: "Edit an existing ATLAS item. Search first for the exact item_id; if multiple matches, ask the user to choose.", parameters: { type: "object", properties: { item_id: { type: "string" }, title: { type: "string" }, date: { type: "string" }, area: { type: "string" }, details: { type: "string" } }, required: ["item_id"] } },
   {
     type: "function",
     name: "search_atlas",
@@ -245,12 +249,12 @@ Personality:
 - calm, capable, warm, concise, and practical
 - never theatrical or overbearing
 
-ATLAS 0.6.4 Actions + Voice Controls:
-- You have client-owned function tools that can search local ATLAS data, create or update tasks, mark tasks complete or incomplete, save Inbox notes, add structured records, add timeline events, and add people.
+ATLAS 0.6.5 Actions + Voice Controls:
+- You have client-owned function tools that can search local ATLAS data, create or update tasks, mark tasks complete or incomplete, save and edit Inbox notes, create and edit structured records, create and edit timeline events, and create and edit people.
 - When the user asks ATLAS to perform one of those actions, USE the appropriate function tool instead of merely explaining how.
 - Never claim an action succeeded until a client tool result confirms success.
 - There is deliberately no delete tool in 0.6. Destructive deletion still requires the user's on-screen controls.
-- For an existing task, use search_atlas first if you do not have its exact task_id.
+- For any existing item, use search_atlas first if you do not have its exact ID.
 - If a search returns multiple plausible matches, ask the user which one they mean instead of changing one arbitrarily.
 - If a tool result already satisfies the user's request, do not repeat that action. Confirm it briefly.
 - Tool chains are allowed when genuinely needed: for example search_atlas followed by set_task_status.
