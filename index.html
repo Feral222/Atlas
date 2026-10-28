@@ -369,17 +369,16 @@ function atlasLogAction(name,collection,before,after){
 }
 function atlasUndoAction(id){
   const e=atlasActionHistory.find(x=>x.id===id);
-  if(!e||e.undone)return toast("Action is not available to undo");
-  const list=data[e.collection];if(!Array.isArray(list))return toast("Cannot undo this action");
-  const target=e.after||e.before;
-  const index=list.findIndex(x=>x.id===target?.id);
-  // Refuse to overwrite newer edits or synced changes from another device.
-  if(e.after&& (index<0||JSON.stringify(list[index])!==JSON.stringify(e.after)))return toast("Item changed since this action; undo cancelled");
-  if(!e.after&&index>=0)return toast("Item already exists; undo cancelled");
+  if(!e||e.undone)return {ok:false,error:"Action is not available to undo."};
+  const list=data[e.collection];if(!Array.isArray(list))return {ok:false,error:"Cannot undo this action."};
+  const target=e.after||e.before,index=list.findIndex(x=>x.id===target?.id);
+  if(e.after&&(index<0||JSON.stringify(list[index])!==JSON.stringify(e.after)))return {ok:false,error:"Item changed since this action; undo cancelled."};
+  if(!e.after&&index>=0)return {ok:false,error:"Item already exists; undo cancelled."};
   if(e.before){if(index>=0)list[index]=clone(e.before);else list.unshift(clone(e.before));}
   else if(index>=0)list.splice(index,1);
   e.undone=true;localStorage.setItem(atlasActionHistoryKey,JSON.stringify(atlasActionHistory));
   save();render();toast("Action undone");
+  return {ok:true,action:"undone",undid:e.name,collection:e.collection,item_id:target?.id};
 }
 function atlasHistoryPanel(){
   return `<div class="section-title"><h3>AI action history</h3><span class="pill">This device</span></div><div class="card"><p class="muted">Recent AI changes. Undo is available only when the item has not changed since the action. History is stored on this device.</p>${atlasActionHistory.length?atlasActionHistory.slice(0,15).map(e=>`<div class="list-item"><div style="flex:1"><strong>${esc(e.name.replaceAll("_"," "))}</strong><div class="muted">${esc((e.after||e.before)?.title||(e.after||e.before)?.name||(e.after||e.before)?.text||"")} • ${esc(new Date(e.at).toLocaleString())}</div></div>${e.undone?`<span class="pill">Undone</span>`:`<button class="small-btn" data-atlas-undo="${esc(e.id)}">Undo</button>`}</div>`).join(""):`<div class="empty">No AI actions recorded yet.</div>`}</div>`;
@@ -461,6 +460,11 @@ async function executeAtlasToolImpl(name,args){
     }
     if(!changes)return {ok:false,error:"No changes specified."};
     save();toast("ATLAS item updated");return {ok:true,action:name,item};
+  }
+  if(name==="undo_last_action"){
+    const latest=atlasActionHistory.find(e=>!e.undone);
+    if(!latest)return {ok:false,error:"No recent AI action is available to undo on this device."};
+    return atlasUndoAction(latest.id);
   }
   if(name==="search_atlas"){
     const q=clean(args.query).toLowerCase();if(!q)return {ok:false,error:"Search query is required."};
@@ -880,12 +884,19 @@ async function sendAtlasMessage(){
   try{
     let body=await callApi({message:apiMessage,history,client_context:atlasClientContext()});
     let rounds=0;
+    const seenActionCalls=new Set();
     while(Array.isArray(body.action_calls)&&body.action_calls.length&&rounds<5){
       const tool_results=[];
       for(const call of body.action_calls){
         let result;
-        try{result=await executeAtlasTool(call.name,call.arguments)}
-        catch(err){result={ok:false,error:err.message||String(err)}}
+        const signature=JSON.stringify([call.name,safeAtlasArgs(call.arguments)]);
+        if(seenActionCalls.has(signature)){
+          result={ok:false,error:"This action was already attempted in this request. Stop and report the prior result."};
+        }else{
+          seenActionCalls.add(signature);
+          try{result=await executeAtlasTool(call.name,call.arguments)}
+          catch(err){result={ok:false,error:err.message||String(err)}}
+        }
         tool_results.push({call_id:call.call_id||"",name:call.name,result});
       }
       rounds++;
@@ -1011,7 +1022,7 @@ document.querySelectorAll("[data-person-delete]").forEach(b=>b.onclick=()=>{data
 document.querySelectorAll("[data-record-delete]").forEach(b=>b.onclick=()=>{data.records=data.records.filter(x=>x.id!==b.dataset.recordDelete);save();render()});
 document.querySelectorAll("[data-doc-delete]").forEach(b=>b.onclick=()=>deleteDoc(b.dataset.docDelete));
 document.querySelectorAll("[data-doc-open]").forEach(b=>b.onclick=()=>{const d=docs.find(x=>x.id===b.dataset.docOpen);if(d){const u=URL.createObjectURL(d.blob);window.open(u,"_blank");setTimeout(()=>URL.revokeObjectURL(u),60000)}});
- document.querySelectorAll("[data-atlas-undo]").forEach(b=>b.onclick=()=>{if(confirm("Undo this AI action?"))atlasUndoAction(b.dataset.atlasUndo)});
+ document.querySelectorAll("[data-atlas-undo]").forEach(b=>b.onclick=()=>{if(confirm("Undo this AI action?")){const r=atlasUndoAction(b.dataset.atlasUndo);if(!r.ok)toast(r.error)}});
 if($("#addTaskBtn"))$("#addTaskBtn").onclick=()=>{const v=$("#newTaskInput").value.trim();if(v){const addCal=$("#taskCalendar").checked,due=$("#taskDue").value;if(addCal&&!due){alert("Choose a Due Date before adding this task to your calendar.");return}const category=($("#taskArea").value&&$("#taskArea").value!=="__new__")?$("#taskArea").value:"General";if(editingTaskId){const task=data.tasks.find(x=>x.id===editingTaskId);if(task){task.title=v;task.area=category;task.due=due;task.priority=$("#taskPriority").value;save();if(addCal)addToIPhoneCalendar(task);editingTaskId=null;render();toast("Task updated")}return}const task={id:uid("task"),title:v,done:false,area:category,due,priority:$("#taskPriority").value};data.tasks.unshift(task);save();if(addCal)addToIPhoneCalendar(task);render();toast("Task added")}};
 if($("#cancelTaskEdit"))$("#cancelTaskEdit").onclick=()=>{editingTaskId=null;render();toast("Editing cancelled")};
 if($("#saveNoteBtn"))$("#saveNoteBtn").onclick=()=>{const v=$("#noteInput").value.trim();if(v){data.notes.unshift({id:uid("note"),text:v,created:new Date().toISOString()});save();render();toast("Saved to Inbox")}};
