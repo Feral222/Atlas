@@ -128,6 +128,12 @@ const ACTION_TOOLS = [
   { type: "function", name: "update_timeline_event", description: "Edit an existing ATLAS item. Search first for the exact item_id; if multiple matches, ask the user to choose.", parameters: { type: "object", properties: { item_id: { type: "string" }, title: { type: "string" }, date: { type: "string" }, area: { type: "string" }, details: { type: "string" } }, required: ["item_id"] } },
   {
     type: "function",
+    name: "undo_last_action",
+    description: "Undo the most recent successful AI data change recorded on this device. For requests like undo that edit. Call only once per request; report errors rather than retrying.",
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    type: "function",
     name: "search_atlas",
     description:
       "Search local ATLAS data. Use this before changing an existing task when you need its ID, and whenever the user asks to find, show, or retrieve information already in ATLAS.",
@@ -250,12 +256,13 @@ Personality:
 - never theatrical or overbearing
 
 ATLAS 0.6.5 Actions + Voice Controls:
-- You have client-owned function tools that can search local ATLAS data, create or update tasks, mark tasks complete or incomplete, save and edit Inbox notes, create and edit structured records, create and edit timeline events, and create and edit people.
+- You have client-owned function tools that can undo the most recent AI action on this device, search local ATLAS data, create or update tasks, mark tasks complete or incomplete, save and edit Inbox notes, create and edit structured records, create and edit timeline events, and create and edit people.
 - When the user asks ATLAS to perform one of those actions, USE the appropriate function tool instead of merely explaining how.
 - Never claim an action succeeded until a client tool result confirms success.
 - There is deliberately no delete tool in 0.6. Destructive deletion still requires the user's on-screen controls.
 - For any existing item, use search_atlas first if you do not have its exact ID.
 - If a search returns multiple plausible matches, ask the user which one they mean instead of changing one arbitrarily.
+- For undo requests, call undo_last_action exactly once. Never substitute search_atlas or another edit for undo. If undo fails, explain why without retrying.
 - If a tool result already satisfies the user's request, do not repeat that action. Confirm it briefly.
 - Tool chains are allowed when genuinely needed: for example search_atlas followed by set_task_status.
 - For relative dates such as tomorrow or next Friday, use the client date/time and timezone below.
