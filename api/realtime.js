@@ -20,6 +20,14 @@ const corsHeaders = {
 
 const ACTION_TOOLS = [
 
+  {type:"function",name:"browse_vault_folder",description:"Open a local folder visually in the ATLAS Library. List folders first to get its ID.",parameters:{type:"object",properties:{folder_id:{type:"string",description:"Folder ID, all, or unfiled"}},required:["folder_id"]}},
+  {type:"function",name:"select_vault_items",description:"Visually multi-select files or folders by exact IDs. Search files/list folders first; do not guess IDs.",parameters:{type:"object",properties:{items:{type:"array",items:{type:"object",properties:{type:{type:"string",enum:["file","folder"]},id:{type:"string"}},required:["type","id"]}},replace:{type:"boolean"}},required:["items"]}},
+  {type:"function",name:"select_all_vault_items",description:"Visually select all files and folders in the CURRENTLY OPEN folder only.",parameters:{type:"object",properties:{},additionalProperties:false}},
+  {type:"function",name:"clear_vault_selection",description:"Clear selected items and exit multi-select mode.",parameters:{type:"object",properties:{},additionalProperties:false}},
+  {type:"function",name:"get_vault_item_details",description:"Read metadata about one imported file or folder; does not read document content.",parameters:{type:"object",properties:{type:{type:"string",enum:["file","folder"]},id:{type:"string"}},required:["type","id"]}},
+  {type:"function",name:"batch_vault_action",description:"Perform move, copy, tag, or delete on currently selected items. Copy and tag apply only to files. For delete, get explicit user confirmation; device confirmation dialog also appears. Report skipped items.",parameters:{type:"object",properties:{action:{type:"string",enum:["move","copy","tag","delete"]},folder_id:{type:"string"},tag:{type:"string"},confirmed:{type:"boolean"}},required:["action"]}},
+
+
   {type:"function",name:"list_vault_folders",description:"List folders and their exact IDs on this device before creating subfolders or moving files.",parameters:{type:"object",properties:{},additionalProperties:false}},
   {type:"function",name:"create_vault_folder",description:"Create a local folder, optionally inside an existing parent folder by exact parent_id. List folders first if parent is unknown.",parameters:{type:"object",properties:{name:{type:"string"},parent_id:{type:"string",description:"Existing folder ID or empty for root"}},required:["name"]}},
   {type:"function",name:"rename_vault_folder",description:"Rename an existing folder by exact ID. List folders first.",parameters:{type:"object",properties:{folder_id:{type:"string"},name:{type:"string"}},required:["folder_id","name"]}},
@@ -224,9 +232,9 @@ export default {
 
 Speak naturally, warmly, calmly, and concisely. You are practical and capable, not theatrical.
 
-ATLAS 0.7.2 Actions + Voice + Local Vault:
+ATLAS 0.7.3 Actions + Voice + Local Vault:
 - You have client-owned function tools that can search local ATLAS data, create or update tasks, mark tasks complete or incomplete, save Inbox notes, add structured records, add timeline events, and add people.
-- You can also create, rename and move local Vault folders, search imported files, and update file names, categories, tags and folder placement. Resolve exact IDs first using list_vault_folders and search_vault_files. Do not claim to read file contents or access the entire iPhone Files or Photos library. Never delete files through AI. Ask for clarification if names are ambiguous. Folders and file bytes remain on this device and do not cloud sync yet.\n- When the user asks ATLAS to perform one of those actions, USE the appropriate function tool rather than merely explaining how.
+- Visual File Manager tools: browse folders, select individual or all visible items, read file metadata, and batch move/copy/tag/delete. Resolve exact IDs first. Copy and tag only support files. Never claim that file sharing or document content reading is available through AI. Ask explicit user permission before deletion, and the device will also show a confirmation. Never assume selected items persist after actions.\n- You can also create, rename and move local Vault folders, search imported files, and update file names, categories, tags and folder placement. Resolve exact IDs first using list_vault_folders and search_vault_files. Do not claim to read file contents or access the entire iPhone Files or Photos library. Never delete files through AI. Ask for clarification if names are ambiguous. Folders and file bytes remain on this device and do not cloud sync yet.\n- When the user asks ATLAS to perform one of those actions, USE the appropriate function tool rather than merely explaining how.
 - Never claim an action succeeded until the function result says ok:true.
 - If you need an existing task ID, call search_atlas first.
 - If search_atlas returns multiple plausible matches, ask the user which one they mean instead of changing one arbitrarily.
