@@ -6,6 +6,14 @@ const corsHeaders = {
 };
 
 const ACTION_TOOLS = [
+
+  {type:"function",name:"list_vault_folders",description:"List folders and their exact IDs on this device before creating subfolders or moving files.",parameters:{type:"object",properties:{},additionalProperties:false}},
+  {type:"function",name:"create_vault_folder",description:"Create a local folder, optionally inside an existing parent folder by exact parent_id. List folders first if parent is unknown.",parameters:{type:"object",properties:{name:{type:"string"},parent_id:{type:"string",description:"Existing folder ID or empty for root"}},required:["name"]}},
+  {type:"function",name:"rename_vault_folder",description:"Rename an existing folder by exact ID. List folders first.",parameters:{type:"object",properties:{folder_id:{type:"string"},name:{type:"string"}},required:["folder_id","name"]}},
+  {type:"function",name:"move_vault_folder",description:"Move an existing folder into another folder or root. List folders first.",parameters:{type:"object",properties:{folder_id:{type:"string"},parent_id:{type:"string",description:"Destination parent folder ID or empty for root"}},required:["folder_id","parent_id"]}},
+  {type:"function",name:"search_vault_files",description:"Find imported files by filename, category, tags or folder path; empty query lists up to 40 files. Returns exact file IDs, not file contents.",parameters:{type:"object",properties:{query:{type:"string"}},required:["query"]}},
+  {type:"function",name:"organize_vault_file",description:"Change an imported file's name, category, tags or folder. First search_vault_files and list_vault_folders to resolve exact IDs; ask if ambiguous. Does not alter file bytes.",parameters:{type:"object",properties:{file_id:{type:"string"},folder_id:{type:"string"},name:{type:"string"},category:{type:"string"},tags:{type:"array",items:{type:"string"}}},required:["file_id"]}},
+
   {
     type: "function",
     name: "create_task",
@@ -255,9 +263,9 @@ Personality:
 - calm, capable, warm, concise, and practical
 - never theatrical or overbearing
 
-ATLAS 0.6.5 Actions + Voice Controls:
+ATLAS 0.7.2 Actions + Voice + Local Vault:
 - You have client-owned function tools that can undo the most recent AI action on this device, search local ATLAS data, create or update tasks, mark tasks complete or incomplete, save and edit Inbox notes, create and edit structured records, create and edit timeline events, and create and edit people.
-- When the user asks ATLAS to perform one of those actions, USE the appropriate function tool instead of merely explaining how.
+- You can also create, rename and move local Vault folders, search imported files, and update file names, categories, tags and folder placement. Resolve exact IDs first using list_vault_folders and search_vault_files. Do not claim to read file contents or access the entire iPhone Files or Photos library. Never delete files through AI. Ask for clarification if names are ambiguous. Folders and file bytes remain on this device and do not cloud sync yet.\n- When the user asks ATLAS to perform one of those actions, USE the appropriate function tool instead of merely explaining how.
 - Never claim an action succeeded until a client tool result confirms success.
 - There is deliberately no delete tool in 0.6. Destructive deletion still requires the user's on-screen controls.
 - For any existing item, use search_atlas first if you do not have its exact ID.
