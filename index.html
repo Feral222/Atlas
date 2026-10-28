@@ -339,7 +339,78 @@ return`<div class="card"><h3>${e?"Edit task":"Add a task"}</h3>${e?`<div class="
 <label class="calendar-option"><input id="taskCalendar" type="checkbox"><span><strong>Add to iPhone Calendar</strong><br><small class="muted">${e?"Create a calendar event for this edited task.":"Creates an all-day event on the due date."}</small></span></label>
 <div class="button-row wide"><button class="primary-btn" id="addTaskBtn">${e?"Save changes":"Add task"}</button>${e?`<button class="small-btn" id="cancelTaskEdit">Cancel editing</button>`:""}</div>
 </div></div><div class="section-title"><h3>Open tasks</h3></div>${taskList(data.tasks.filter(t=>!t.done))}<div class="section-title"><h3>Completed</h3></div>${taskList(data.tasks.filter(t=>t.done))}${atlasHistoryPanel()}`}
-function library(){const s=[...docs].sort((a,b)=>(b.created||"").localeCompare(a.created||""));return`<div class="upload-zone"><h3>Add documents or photos</h3><p class="muted">Files stay on this device.</p><label class="upload-label">Choose files<input id="docInput" type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.rtf" capture="environment"></label></div><div class="section-title"><h3>Document library</h3><span class="pill">${docs.length} items</span></div>${s.length?`<div class="list">${s.map(d=>`<div class="list-item"><div class="doc-preview">${String(d.type||"").startsWith("image/")?`<img src="${URL.createObjectURL(d.blob)}">`:"📄"}</div><div><div class="item-title">${esc(d.name)}</div><small class="muted">${esc(d.area||"General")} • ${new Date(d.created).toLocaleString()}</small><div>${(d.tags||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join("")}</div></div><div><button class="small-btn" data-doc-open="${esc(d.id)}">Open</button> <button class="danger-btn" data-doc-delete="${esc(d.id)}">Delete</button></div></div>`).join("")}</div>`:`<div class="empty">No documents added yet.</div>`}`}
+const atlasVaultFoldersKey="atlasVaultFolders071";
+let atlasVaultFolders=(()=>{try{const x=JSON.parse(localStorage.getItem(atlasVaultFoldersKey)||"[]");return Array.isArray(x)?x:[]}catch{return[]}})();
+let atlasVaultFolderFilter="all",atlasVaultSearch="",atlasVaultSort="newest";
+function atlasSaveVaultFolders(){localStorage.setItem(atlasVaultFoldersKey,JSON.stringify(atlasVaultFolders))}
+function atlasVaultFolderName(id){return atlasVaultFolders.find(f=>f.id===id)?.name||"Unfiled"}
+function atlasVaultFolderOptions(selected=""){return `<option value="">Unfiled</option>`+atlasVaultFolders.map(f=>`<option value="${esc(f.id)}" ${f.id===selected?"selected":""}>${esc(f.name)}</option>`).join("")}
+function atlasVaultFolderPath(id,seen=new Set()){
+  const f=atlasVaultFolders.find(x=>x.id===id);
+  if(!f||seen.has(id))return "Unfiled";
+  seen.add(id);
+  return f.parentId?atlasVaultFolderPath(f.parentId,seen)+" / "+f.name:f.name;
+}
+function atlasVaultFolderDescendants(id){
+  const found=new Set([id]);let previous=-1;
+  while(previous!==found.size){previous=found.size;atlasVaultFolders.forEach(f=>{if(found.has(f.parentId))found.add(f.id)})}
+  return found;
+}
+async function atlasVaultEditDoc(id){
+  const d=docs.find(x=>x.id===id);if(!d)return;
+  const name=prompt("File name",d.name);if(name===null)return;
+  if(!name.trim()){alert("File name cannot be empty.");return}
+  const tags=prompt("Tags (comma separated)",(d.tags||[]).join(", "));if(tags===null)return;
+  const area=prompt("Category",d.area||"General");if(area===null)return;
+  await putDoc({...d,name:name.trim(),tags:tags.split(",").map(x=>x.trim()).filter(Boolean),area:area.trim()||"General"});
+  await loadDocs();toast("File details saved");
+}
+async function atlasVaultMoveDoc(id,folderId){
+  const d=docs.find(x=>x.id===id);if(!d)return;
+  if(folderId&&!atlasVaultFolders.some(f=>f.id===folderId))return;
+  await putDoc({...d,folderId:folderId||""});await loadDocs();toast("File moved");
+}
+function atlasVaultNewFolder(){
+  const name=prompt("New folder name");if(name===null)return;
+  if(!name.trim())return alert("Folder name is required.");
+  const parentId=atlasVaultFolderFilter!=="all"&&atlasVaultFolderFilter!=="unfiled"?atlasVaultFolderFilter:"";
+  atlasVaultFolders.push({id:uid("folder"),name:name.trim(),parentId});
+  atlasSaveVaultFolders();render();toast("Folder created");
+}
+function atlasVaultRenameFolder(id){
+  const f=atlasVaultFolders.find(x=>x.id===id);if(!f)return;
+  const name=prompt("Rename folder",f.name);if(name===null)return;
+  if(!name.trim())return alert("Folder name is required.");
+  f.name=name.trim();atlasSaveVaultFolders();render();
+}
+function atlasVaultDeleteFolder(id){
+  const f=atlasVaultFolders.find(x=>x.id===id);if(!f)return;
+  if(!confirm(`Remove folder "${f.name}"? Files will be moved to Unfiled, not deleted.`))return;
+  const descendants=atlasVaultFolderDescendants(id);
+  Promise.all(docs.filter(d=>descendants.has(d.folderId)).map(d=>putDoc({...d,folderId:""}))).then(()=>{
+    atlasVaultFolders=atlasVaultFolders.filter(f=>!descendants.has(f.id));
+    atlasSaveVaultFolders();atlasVaultFolderFilter="all";loadDocs();toast("Folder removed; files preserved");
+  }).catch(e=>alert("Folder removal failed: "+e.message));
+}
+function library(){
+  const q=atlasVaultSearch.trim().toLowerCase();
+  const folderSet=atlasVaultFolderFilter!=="all"&&atlasVaultFolderFilter!=="unfiled"?atlasVaultFolderDescendants(atlasVaultFolderFilter):null;
+  const filtered=docs.filter(d=>{
+    if(atlasVaultFolderFilter==="unfiled"&&d.folderId)return false;
+    if(folderSet&&!folderSet.has(d.folderId))return false;
+    return !q||[d.name,d.area,atlasVaultFolderPath(d.folderId),(d.tags||[]).join(" ")].join(" ").toLowerCase().includes(q);
+  });
+  filtered.sort((a,b)=>atlasVaultSort==="name"?String(a.name).localeCompare(String(b.name)):atlasVaultSort==="oldest"?String(a.created||"").localeCompare(String(b.created||"")):String(b.created||"").localeCompare(String(a.created||"")));
+  return `<div class="upload-zone"><h3>Files & Vault · 0.7.1</h3><p class="muted">Hybrid vault foundation: files remain local on this device. Cloud file upload is not enabled yet. Your existing files are preserved.</p><label class="upload-label">Choose files<input id="docInput" type="file" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.rtf"></label></div>
+  <div class="card"><h3>Folders</h3><button class="small-btn" id="vaultNewFolder">+ New folder</button><div style="display:flex;flex-wrap:wrap;gap:7px;margin-top:12px">
+  <button class="small-btn" data-vault-filter="all">All files (${docs.length})</button>
+  <button class="small-btn" data-vault-filter="unfiled">Unfiled (${docs.filter(d=>!d.folderId).length})</button>
+  ${atlasVaultFolders.map(f=>`<span style="display:inline-flex;gap:3px;align-items:center"><button class="small-btn" data-vault-filter="${esc(f.id)}">${esc(atlasVaultFolderPath(f.id))}</button><button class="small-btn" data-vault-rename="${esc(f.id)}" aria-label="Rename folder">✎</button><button class="small-btn" data-vault-remove="${esc(f.id)}" aria-label="Remove folder">×</button></span>`).join("")}
+  </div></div>
+  <div class="card"><div class="form-grid"><input id="vaultSearch" placeholder="Search file names, tags and folders" value="${esc(atlasVaultSearch)}"><select id="vaultSort"><option value="newest" ${atlasVaultSort==="newest"?"selected":""}>Newest first</option><option value="oldest" ${atlasVaultSort==="oldest"?"selected":""}>Oldest first</option><option value="name" ${atlasVaultSort==="name"?"selected":""}>File name</option></select></div></div>
+  <div class="section-title"><h3>Document library</h3><span class="pill">${filtered.length} of ${docs.length} files</span></div>
+  ${filtered.length?`<div class="list">${filtered.map(d=>`<div class="list-item"><div class="doc-preview">${String(d.type||"").startsWith("image/")?`<img src="${URL.createObjectURL(d.blob)}">`:"📄"}</div><div style="flex:1;min-width:0"><div class="item-title">${esc(d.name)}</div><small class="muted">${esc(d.area||"General")} • ${esc(atlasVaultFolderPath(d.folderId))} • ${esc(new Date(d.created).toLocaleString())}</small><div>${(d.tags||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join("")}</div><label class="muted">Move to <select data-vault-move="${esc(d.id)}">${atlasVaultFolderOptions(d.folderId||"")}</select></label></div><div><button class="small-btn" data-doc-open="${esc(d.id)}">Open</button> <button class="small-btn" data-vault-edit="${esc(d.id)}">Edit</button> <button class="danger-btn" data-doc-delete="${esc(d.id)}">Delete</button></div></div>`).join("")}</div>`:`<div class="empty">No matching documents.</div>`}`;
+}
 function timeline(){return`<div class="card"><h3>Add timeline event</h3><div class="form-grid"><input id="eventTitle" placeholder="Event title"><input id="eventDate" type="date"><select id="eventArea">${allCategories().map(a=>`<option>${esc(a)}</option>`).join("")}</select><input id="eventDetails" placeholder="Details"><button class="primary-btn wide" id="addEventBtn">Add event</button></div></div><div class="section-title"><h3>Timeline</h3></div>${timelineList([...data.events].sort((a,b)=>b.date.localeCompare(a.date)))}`}
 function people(){return`<div class="card"><h3>Add person</h3><div class="form-grid"><input id="personName" placeholder="Name"><input id="personRelationship" placeholder="Relationship or role"><textarea class="wide" id="personNotes" placeholder="Notes"></textarea><button class="primary-btn wide" id="addPersonBtn">Add person</button></div></div><div class="section-title"><h3>People</h3></div><div class="grid cols-3">${data.people.length?data.people.map(p=>`<div class="card"><h3>${esc(p.name)}</h3><span class="pill">${esc(p.relationship||"")}</span><p class="muted record-body">${esc(p.notes||"")}</p><button class="small-btn" data-person-delete="${esc(p.id)}">Delete</button></div>`).join(""):`<div class="empty">No people added yet.</div>`}</div>`}
 function recordsFor(area){return data.records.filter(r=>String(r.area||"").toLowerCase()===area.toLowerCase()).sort((a,b)=>(b.date||b.created||"").localeCompare(a.date||a.created||""))}
@@ -915,7 +986,7 @@ async function sendAtlasMessage(){
     setTimeout(()=>{const w=$("#atlasChatWindow");if(w)w.scrollTop=w.scrollHeight},40);
   }
 }
-function settings(){return`<div class="grid cols-2"><div class="card"><h3>Version</h3><div class="big">0.6.5</div><p class="muted">Sync — private shared state stage.</p></div><div class="card"><h3>ATLAS Brain + Voice</h3><p class="badge-ok">Secure text, Realtime voice, and client-side action tools online.</p><p class="muted">Your OpenAI API key remains server-side. This device stores only your temporary ATLAS access password and local conversation history.</p><button class="small-btn" data-open="atlas">Open ATLAS Brain</button></div><div class="card"><h3>Local storage</h3><p class="muted">Tasks, notes, records, events, people and ATLAS chat history are stored in this browser. Uploaded files use IndexedDB.</p></div><div class="card"><h3>Backup</h3><p class="muted">Use Export backup in the menu to save your ATLAS metadata as a JSON file. Chat history is currently separate from that backup.</p></div><div class="card"><h3>Privacy</h3><p class="muted">Text messages are sent through your private ATLAS backend with <strong>store:false</strong>. Live voice uses short-lived Realtime client secrets minted by Vercel; your permanent OpenAI key stays server-side.</p></div><div class="card"><h3>Private sync</h3><p class="badge-ok">Encrypted ATLAS state sync is enabled.</p><p class="muted">Chat, tasks, notes, records, timeline, people and custom categories sync through your private Vercel storage. Documents/photos remain local for now.</p><button class="small-btn" id="atlasSyncNowBtn">Sync now</button></div><div class="card"><h3>Reset</h3><p class="muted">This resets metadata only; uploaded documents and ATLAS Brain credentials remain unless separately cleared.</p><button class="danger-btn" id="clearDataBtn">Reset metadata</button></div></div>`}
+function settings(){return`<div class="grid cols-2"><div class="card"><h3>Version</h3><div class="big">0.7.1</div><p class="muted">Sync — private shared state stage.</p></div><div class="card"><h3>ATLAS Brain + Voice</h3><p class="badge-ok">Secure text, Realtime voice, and client-side action tools online.</p><p class="muted">Your OpenAI API key remains server-side. This device stores only your temporary ATLAS access password and local conversation history.</p><button class="small-btn" data-open="atlas">Open ATLAS Brain</button></div><div class="card"><h3>Local storage</h3><p class="muted">Tasks, notes, records, events, people and ATLAS chat history are stored in this browser. Uploaded files use IndexedDB.</p></div><div class="card"><h3>Backup</h3><p class="muted">Use Export backup in the menu to save your ATLAS metadata as a JSON file. Chat history is currently separate from that backup.</p></div><div class="card"><h3>Privacy</h3><p class="muted">Text messages are sent through your private ATLAS backend with <strong>store:false</strong>. Live voice uses short-lived Realtime client secrets minted by Vercel; your permanent OpenAI key stays server-side.</p></div><div class="card"><h3>Private sync</h3><p class="badge-ok">Encrypted ATLAS state sync is enabled.</p><p class="muted">Chat, tasks, notes, records, timeline, people and custom categories sync through your private Vercel storage. Documents/photos remain local during 0.7.1; encrypted cloud file sync will be added in a later 0.7 release.</p><button class="small-btn" id="atlasSyncNowBtn">Sync now</button></div><div class="card"><h3>Reset</h3><p class="muted">This resets metadata only; uploaded documents and ATLAS Brain credentials remain unless separately cleared.</p><button class="danger-btn" id="clearDataBtn">Reset metadata</button></div></div>`}
 function searchResults(q){q=q.toLowerCase().trim();if(!q)return dashboard();const th=data.tasks.filter(t=>(`${t.title} ${t.area} ${t.priority}`).toLowerCase().includes(q)),nh=data.notes.filter(n=>String(n.text||"").toLowerCase().includes(q)),rh=data.records.filter(r=>(`${r.title} ${r.area} ${r.type} ${r.details} ${(r.tags||[]).join(" ")}`).toLowerCase().includes(q)),dh=docs.filter(d=>(`${d.name} ${d.area} ${(d.tags||[]).join(" ")}`).toLowerCase().includes(q)),eh=data.events.filter(e=>(`${e.title} ${e.area} ${e.details}`).toLowerCase().includes(q)),ph=data.people.filter(p=>(`${p.name} ${p.relationship} ${p.notes}`).toLowerCase().includes(q));return`<div class="section-title"><h3>Search results for “${esc(q)}”</h3></div><div class="grid cols-3"><div class="card"><h3>Tasks</h3>${th.length?th.map(t=>`<p>${esc(t.title)}</p>`).join(""):`<p class="muted">No matches</p>`}</div><div class="card"><h3>Records</h3>${rh.length?rh.map(r=>`<p>${esc(r.title)} <span class="pill">${esc(r.area)}</span></p>`).join(""):`<p class="muted">No matches</p>`}</div><div class="card"><h3>Documents</h3>${dh.length?dh.map(d=>`<p>${esc(d.name)}</p>`).join(""):`<p class="muted">No matches</p>`}</div><div class="card"><h3>Timeline</h3>${eh.length?eh.map(e=>`<p>${esc(fmt(e.date))} — ${esc(e.title)}</p>`).join(""):`<p class="muted">No matches</p>`}</div><div class="card"><h3>Inbox</h3>${nh.length?nh.map(n=>`<p>${esc(n.text)}</p>`).join(""):`<p class="muted">No matches</p>`}</div><div class="card"><h3>People</h3>${ph.length?ph.map(p=>`<p>${esc(p.name)} — ${esc(p.relationship)}</p>`).join(""):`<p class="muted">No matches</p>`}</div></div>`}
 function render(){const tm={home:"Command Center",atlas:"ATLAS Brain",inbox:"Inbox",actions:"Action Center",library:"Document Library",timeline:"Timeline",people:"People",settings:"Settings"};pageTitle.textContent=tm[currentPage]||currentPage[0].toUpperCase()+currentPage.slice(1);const hero=document.querySelector(".hero");if(hero)hero.style.display=currentPage==="atlas"?"none":"grid";content.innerHTML=currentPage==="home"?dashboard():currentPage==="atlas"?atlasChatPage():currentPage==="inbox"?inbox():currentPage==="actions"?actions():currentPage==="library"?library():currentPage==="timeline"?timeline():currentPage==="people"?people():currentPage==="settings"?settings():sectionPage(currentPage);bind();if(currentPage==="atlas")setTimeout(()=>{const w=$("#atlasChatWindow");if(w)w.scrollTop=w.scrollHeight;setVoiceStatus(atlasVoice.status)},20)}
 
@@ -1020,6 +1091,14 @@ document.querySelectorAll("[data-note-delete]").forEach(b=>b.onclick=()=>{data.n
 document.querySelectorAll("[data-event-delete]").forEach(b=>b.onclick=()=>{data.events=data.events.filter(x=>x.id!==b.dataset.eventDelete);save();render()});
 document.querySelectorAll("[data-person-delete]").forEach(b=>b.onclick=()=>{data.people=data.people.filter(x=>x.id!==b.dataset.personDelete);save();render()});
 document.querySelectorAll("[data-record-delete]").forEach(b=>b.onclick=()=>{data.records=data.records.filter(x=>x.id!==b.dataset.recordDelete);save();render()});
+if($("#vaultNewFolder"))$("#vaultNewFolder").onclick=atlasVaultNewFolder;
+document.querySelectorAll("[data-vault-filter]").forEach(b=>b.onclick=()=>{atlasVaultFolderFilter=b.dataset.vaultFilter;render()});
+document.querySelectorAll("[data-vault-rename]").forEach(b=>b.onclick=()=>atlasVaultRenameFolder(b.dataset.vaultRename));
+document.querySelectorAll("[data-vault-remove]").forEach(b=>b.onclick=()=>atlasVaultDeleteFolder(b.dataset.vaultRemove));
+document.querySelectorAll("[data-vault-edit]").forEach(b=>b.onclick=()=>atlasVaultEditDoc(b.dataset.vaultEdit));
+document.querySelectorAll("[data-vault-move]").forEach(s=>s.onchange=()=>atlasVaultMoveDoc(s.dataset.vaultMove,s.value));
+if($("#vaultSearch"))$("#vaultSearch").onchange=e=>{atlasVaultSearch=e.target.value;render()};
+if($("#vaultSort"))$("#vaultSort").onchange=e=>{atlasVaultSort=e.target.value;render()};
 document.querySelectorAll("[data-doc-delete]").forEach(b=>b.onclick=()=>deleteDoc(b.dataset.docDelete));
 document.querySelectorAll("[data-doc-open]").forEach(b=>b.onclick=()=>{const d=docs.find(x=>x.id===b.dataset.docOpen);if(d){const u=URL.createObjectURL(d.blob);window.open(u,"_blank");setTimeout(()=>URL.revokeObjectURL(u),60000)}});
  document.querySelectorAll("[data-atlas-undo]").forEach(b=>b.onclick=()=>{if(confirm("Undo this AI action?")){const r=atlasUndoAction(b.dataset.atlasUndo);if(!r.ok)toast(r.error)}});
@@ -1029,7 +1108,7 @@ if($("#saveNoteBtn"))$("#saveNoteBtn").onclick=()=>{const v=$("#noteInput").valu
 if($("#addEventBtn"))$("#addEventBtn").onclick=()=>{const title=$("#eventTitle").value.trim(),date=$("#eventDate").value;if(title&&date){data.events.push({id:uid("event"),title,date,area:$("#eventArea").value,details:$("#eventDetails").value.trim()});save();render();toast("Event added")}};
 if($("#addPersonBtn"))$("#addPersonBtn").onclick=()=>{const name=$("#personName").value.trim();if(name){data.people.push({id:uid("person"),name,relationship:$("#personRelationship").value.trim(),notes:$("#personNotes").value.trim()});save();render();toast("Person added")}};
 if($("#addRecordBtn"))$("#addRecordBtn").onclick=()=>{const title=$("#recordTitle").value.trim();if(title){data.records.unshift({id:uid("record"),title,area:$("#addRecordBtn").dataset.area,type:$("#recordType").value,date:$("#recordDate").value,tags:$("#recordTags").value.split(",").map(x=>x.trim()).filter(Boolean),details:$("#recordDetails").value.trim(),created:new Date().toISOString()});save();render();toast("Record saved")}};
-if($("#docInput"))$("#docInput").onchange=async e=>{for(const f of e.target.files){const tags=(prompt(`Tags for ${f.name} (comma separated):`,"")||"").split(",").map(x=>x.trim()).filter(Boolean),area=prompt(`ATLAS area for ${f.name}:`,"General")||"General";await putDoc({id:uid("doc"),name:f.name,type:f.type||"application/octet-stream",size:f.size,created:new Date().toISOString(),tags,area,blob:f})}await loadDocs();toast("Files added")};
+if($("#docInput"))$("#docInput").onchange=async e=>{for(const f of e.target.files){const tags=(prompt(`Tags for ${f.name} (comma separated):`,"")||"").split(",").map(x=>x.trim()).filter(Boolean),area=prompt(`ATLAS area for ${f.name}:`,"General")||"General";await putDoc({id:uid("doc"),name:f.name,type:f.type||"application/octet-stream",size:f.size,created:new Date().toISOString(),tags,area,folderId:atlasVaultFolderFilter!=="all"&&atlasVaultFolderFilter!=="unfiled"?atlasVaultFolderFilter:"",blob:f})}await loadDocs();toast("Files added")};
 if($("#clearDataBtn"))$("#clearDataBtn").onclick=()=>{if(confirm("Reset ATLAS metadata? Uploaded files will remain.")){data=clone(defaults);save();go("home")}}
 }
 $("#globalSearch").addEventListener("input",e=>{pageTitle.textContent=e.target.value?"Search":"Command Center";content.innerHTML=searchResults(e.target.value);bind()});
