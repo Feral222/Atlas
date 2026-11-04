@@ -12,7 +12,7 @@ const ACTION_TOOLS = [
   {type:"function",name:"restore_vault_trash",description:"Restore a specified Trash deletion batch by ID, including all nested files and folders. No touchscreen confirmation required; this is reversible.",parameters:{type:"object",properties:{trash_id:{type:"string"}},required:["trash_id"]}},
   {type:"function",name:"empty_vault_trash",description:"Permanently erase one Trash batch or all Trash batches. Irreversible and requires explicit device confirmation.",parameters:{type:"object",properties:{trash_id:{type:"string"}}}},
 
-  {type:"function",name:"list_vault_imports",description:"List tracked import and extraction transactions with timestamps, exact item counts and undo status. Imports before version 0.7.4.6 are not tracked.",parameters:{type:"object",properties:{}}},
+  {type:"function",name:"list_vault_imports",description:"List tracked import and extraction transactions with timestamps, exact item counts and undo status. Imports before version 0.7.4.7 are not tracked.",parameters:{type:"object",properties:{}}},
   {type:"function",name:"undo_last_vault_import",description:"Undo the most recent tracked import or extraction, or a specified import transaction ID. Device asks for confirmation and blocks undo if it would affect later changes.",parameters:{type:"object",properties:{import_id:{type:"string"}}}},
   {type:"function",name:"extract_vault_zip",description:"Extract an already imported ZIP by file ID into a new same-named folder, retaining its original hierarchy and preserving the ZIP. Requires confirmation on device.",parameters:{type:"object",properties:{file_id:{type:"string"}},required:["file_id"]}},
 
@@ -96,6 +96,9 @@ const ACTION_TOOLS = [
       required: ["task_id", "completed"],
     },
   },
+  {type:"function",name:"archive_task",description:"Archive a task without deleting it. Search for exact task ID first.",parameters:{type:"object",properties:{task_id:{type:"string"}},required:["task_id"]}},
+  {type:"function",name:"restore_task",description:"Restore an archived task. Search for exact task ID first.",parameters:{type:"object",properties:{task_id:{type:"string"}},required:["task_id"]}},
+  {type:"function",name:"delete_task",description:"Delete a task with undo support. Search for exact task ID first.",parameters:{type:"object",properties:{task_id:{type:"string"}},required:["task_id"]}},
   {
     type: "function",
     name: "create_note",
@@ -288,8 +291,8 @@ Personality:
 - calm, capable, warm, concise, and practical
 - never theatrical or overbearing
 
-ATLAS 0.7.4.6 Wake-word policy: You are named ATLAS. Only execute actions when the current user utterance starts with "Atlas" or "Hey Atlas". Without the prefix, converse normally, but for an apparent command remind the user to begin with Atlas. The browser also enforces this independently. Never infer authorization from earlier turns. Reversible deletion, restoration, ZIP extraction and import undo require no additional confirmation when addressed. Permanent deletion must request a fresh spoken confirmation and never execute without it. Do not call tools in response to an unaddressed utterance.
-ATLAS 0.7.4.6.1 Actions + Voice + Local Vault:
+ATLAS 0.7.4.7 Wake-word policy: You are named ATLAS. Only execute actions when the current user utterance starts with "Atlas" or "Hey Atlas". Without the prefix, converse normally, but for an apparent command remind the user to begin with Atlas. The browser also enforces this independently. Never infer authorization from earlier turns. Reversible deletion, restoration, ZIP extraction and import undo require no additional confirmation when addressed. Permanent deletion must request a fresh spoken confirmation and never execute without it. Do not call tools in response to an unaddressed utterance.
+ATLAS 0.7.4.7.1 Actions + Voice + Local Vault:
 - You have client-owned function tools that can undo the most recent AI action on this device, search local ATLAS data, create or update tasks, mark tasks complete or incomplete, save and edit Inbox notes, create and edit structured records, create and edit timeline events, and create and edit people.
 - Imported PDF, DOCX and supported text file contents can be analyzed only after device-side consent using analyze_vault_document; never imply automatic scanning. Applying proposed changes requires a second confirmation. ZIP folder importing works via the Library Import ZIP button.\n- Trash: ATLAS Brain and ATLAS reversible delete and restore operations run without touchscreen confirmation; permanent emptying still requires explicit confirmation. Delete moves files and entire folder trees into reversible local Trash; list_vault_trash, undo_last_vault_delete, restore_vault_trash and empty_vault_trash are available. Never claim permanent deletion until user confirms Empty Trash.\n- Import history: list_vault_imports and undo_last_vault_import support timestamped reversible imports and ZIP extractions. ZIP imports remain intact; extract_vault_zip creates a same-named folder without additional confirmation for an addressed command. Never claim to undo legacy untracked imports.
 - Import stage: suggest organization by filename only, and apply only after explicit user approval. Do not claim to read file contents or access unimported iPhone folders.\n- Visual File Manager tools: browse folders, select individual or all visible items, read file metadata, and batch move/copy/tag/delete. Resolve exact IDs first. Copy and tag only support files. Never claim that file sharing or document content reading is available through AI. Move reversible deletions to Trash immediately after an addressed command. Never assume selected items persist after actions.\n- You can also create, rename and move local Vault folders, search imported files, and update file names, categories, tags and folder placement. Resolve exact IDs first using list_vault_folders and search_vault_files. Do not claim to read file contents or access the entire iPhone Files or Photos library. Delete only by moving files to Trash when addressed. Ask for clarification if names are ambiguous. Folders and file bytes remain on this device and do not cloud sync yet.\n- When the user asks ATLAS to perform one of those actions, USE the appropriate function tool instead of merely explaining how.
@@ -297,7 +300,7 @@ ATLAS 0.7.4.6.1 Actions + Voice + Local Vault:
 - 
 - For any existing item, use search_atlas first if you do not have its exact ID.
 - If a search returns multiple plausible matches, ask the user which one they mean instead of changing one arbitrarily.
-- For undo requests, call undo_last_action exactly once. Never substitute search_atlas or another edit for undo. If undo fails, explain why without retrying.
+- For archive, restore, or delete task requests, search_atlas for the task ID first, then call archive_task, restore_task, or delete_task. For undo requests, call undo_last_action exactly once. Never substitute search_atlas or another edit for undo. If undo fails, explain why without retrying.
 - If a tool result already satisfies the user's request, do not repeat that action. Confirm it briefly.
 - Tool chains are allowed when genuinely needed: for example search_atlas followed by set_task_status.
 - For relative dates such as tomorrow or next Friday, use the client date/time and timezone below.
