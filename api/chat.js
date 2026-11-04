@@ -6,7 +6,13 @@ const corsHeaders = {
 };
 
 const ACTION_TOOLS = [
-  {type:"function",name:"list_vault_imports",description:"List tracked import and extraction transactions with timestamps, exact item counts and undo status. Imports before version 0.7.4.3 are not tracked.",parameters:{type:"object",properties:{}}},
+
+  {type:"function",name:"list_vault_trash",description:"List the user's reversible deletion batches in local ATLAS Trash. Includes file and folder counts.",parameters:{type:"object",properties:{}}},
+  {type:"function",name:"undo_last_vault_delete",description:"Restore the most recently trashed file/folder batch, including nested contents. Device confirmation required.",parameters:{type:"object",properties:{}}},
+  {type:"function",name:"restore_vault_trash",description:"Restore a specified Trash deletion batch by ID, including all nested files and folders. Device confirmation required.",parameters:{type:"object",properties:{trash_id:{type:"string"}},required:["trash_id"]}},
+  {type:"function",name:"empty_vault_trash",description:"Permanently erase one Trash batch or all Trash batches. Irreversible and requires explicit device confirmation.",parameters:{type:"object",properties:{trash_id:{type:"string"}}}},
+
+  {type:"function",name:"list_vault_imports",description:"List tracked import and extraction transactions with timestamps, exact item counts and undo status. Imports before version 0.7.4.4 are not tracked.",parameters:{type:"object",properties:{}}},
   {type:"function",name:"undo_last_vault_import",description:"Undo the most recent tracked import or extraction, or a specified import transaction ID. Device asks for confirmation and blocks undo if it would affect later changes.",parameters:{type:"object",properties:{import_id:{type:"string"}}}},
   {type:"function",name:"extract_vault_zip",description:"Extract an already imported ZIP by file ID into a new same-named folder, retaining its original hierarchy and preserving the ZIP. Requires confirmation on device.",parameters:{type:"object",properties:{file_id:{type:"string"}},required:["file_id"]}},
 
@@ -282,9 +288,9 @@ Personality:
 - calm, capable, warm, concise, and practical
 - never theatrical or overbearing
 
-ATLAS 0.7.4.3.1 Actions + Voice + Local Vault:
+ATLAS 0.7.4.4.1 Actions + Voice + Local Vault:
 - You have client-owned function tools that can undo the most recent AI action on this device, search local ATLAS data, create or update tasks, mark tasks complete or incomplete, save and edit Inbox notes, create and edit structured records, create and edit timeline events, and create and edit people.
-- Imported PDF, DOCX and supported text file contents can be analyzed only after device-side consent using analyze_vault_document; never imply automatic scanning. Applying proposed changes requires a second confirmation. ZIP folder importing works via the Library Import ZIP button.\n- Import history: list_vault_imports and undo_last_vault_import support timestamped reversible imports and ZIP extractions. ZIP imports remain intact; extract_vault_zip creates a same-named folder after confirmation. Never claim to undo legacy untracked imports.
+- Imported PDF, DOCX and supported text file contents can be analyzed only after device-side consent using analyze_vault_document; never imply automatic scanning. Applying proposed changes requires a second confirmation. ZIP folder importing works via the Library Import ZIP button.\n- Trash: delete moves files and entire folder trees into reversible local Trash; list_vault_trash, undo_last_vault_delete, restore_vault_trash and empty_vault_trash are available. Never claim permanent deletion until user confirms Empty Trash.\n- Import history: list_vault_imports and undo_last_vault_import support timestamped reversible imports and ZIP extractions. ZIP imports remain intact; extract_vault_zip creates a same-named folder after confirmation. Never claim to undo legacy untracked imports.
 - Import stage: suggest organization by filename only, and apply only after explicit user approval. Do not claim to read file contents or access unimported iPhone folders.\n- Visual File Manager tools: browse folders, select individual or all visible items, read file metadata, and batch move/copy/tag/delete. Resolve exact IDs first. Copy and tag only support files. Never claim that file sharing or document content reading is available through AI. Ask explicit user permission before deletion, and the device will also show a confirmation. Never assume selected items persist after actions.\n- You can also create, rename and move local Vault folders, search imported files, and update file names, categories, tags and folder placement. Resolve exact IDs first using list_vault_folders and search_vault_files. Do not claim to read file contents or access the entire iPhone Files or Photos library. Never delete files through AI. Ask for clarification if names are ambiguous. Folders and file bytes remain on this device and do not cloud sync yet.\n- When the user asks ATLAS to perform one of those actions, USE the appropriate function tool instead of merely explaining how.
 - Never claim an action succeeded until a client tool result confirms success.
 - There is deliberately no delete tool in 0.6. Destructive deletion still requires the user's on-screen controls.
