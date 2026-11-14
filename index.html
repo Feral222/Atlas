@@ -739,6 +739,13 @@ async function atlasExtractDocument(doc){
  const blob=doc.blob;
  if(!blob)throw Error("Document bytes are unavailable.");
  const name=doc.name.toLowerCase(),type=doc.type||"";
+ if(/\.(png|jpe?g|webp|gif)$/i.test(name)||/^(image\/(png|jpeg|webp|gif))$/.test(type)){
+  if(blob.size>6*1024*1024)throw Error("Image analysis supports up to 6 MB.");
+  const mime=/^image\/(png|jpeg|webp|gif)$/.test(type)?type:(/\.png$/i.test(name)?"image/png":/\.webp$/i.test(name)?"image/webp":/\.gif$/i.test(name)?"image/gif":"image/jpeg");
+  const bytes=new Uint8Array(await blob.arrayBuffer());let binary="";
+  for(let i=0;i<bytes.length;i+=16384)binary+=String.fromCharCode(...bytes.subarray(i,i+16384));
+  return {kind:"image",mime,base64:btoa(binary)};
+ }
  if(name.endsWith(".pdf")||type==="application/pdf"){
   if(blob.size>8*1024*1024)throw Error("PDF analysis supports up to 8 MB.");
   const bytes=new Uint8Array(await blob.arrayBuffer());
@@ -759,7 +766,7 @@ async function atlasExtractDocument(doc){
  if(/\.(txt|md|csv|json|xml|html|htm|rtf|log)$/i.test(name)||type.startsWith("text/")){
   return {kind:"text",text:(await blob.slice(0,120000).text()).slice(0,35000)};
  }
- throw Error("Content analysis currently supports PDF, DOCX, TXT, MD, CSV, JSON, HTML, XML, RTF, and LOG. Scanned images require OCR in a later release.");
+ throw Error("Content analysis currently supports PDF, DOCX, TXT, MD, CSV, JSON, HTML, XML, RTF, and LOG. Images can be analyzed with explicit cloud approval.");
 }
 async function atlasAnalyzeDocument(id){
  const doc=docs.find(d=>d.id===id);
@@ -808,11 +815,133 @@ async function atlasApplyImportSuggestions(){
  }
  atlasSaveVaultFolders();await loadDocs();toast(`${changed} files organized`);return {ok:true,changed};
 }
+// Atlas 0.7.6.10: local, review-first bulk organizer. No bytes are uploaded.
+const atlasBulkKey07611="atlasBulkOrganizer07611";
+let atlasBulkBusy07611=false,atlasBulkPlan07611=null;
+const atlasBulkRules07611=[
+ ["Housing",/\b(rent|lease|housing|tenant|landlord|voucher|inspection|lacda|section\s*8)\b/i],
+ ["Medical",/\b(medical|health|patient|doctor|prescription|diagnos|lab\s*result|hospital|clinic)\b/i],
+ ["Insurance",/\b(insurance|policy|coverage|premium|claim|medicaid|medi.cal)\b/i],
+ ["Finance",/\b(bank|statement|tax|income|budget|paypal|payment|credit|financial)\b/i],
+ ["Receipts",/\b(receipt|invoice|order\s*number|purchase|subtotal|total\s*due)\b/i],
+ ["Legal",/\b(court|attorney|legal|lawsuit|subpoena|contract|agreement)\b/i],
+ ["Vehicles",/\b(vehicle|dmv|registration|license\s*plate|automobile|car\s*repair)\b/i],
+ ["Pets",/\b(veterinary|veterinarian|pet|cat|dog|vaccination|spay|neuter)\b/i],
+ ["Projects",/\b(project|github|source\s*code|vercel|atlas|design|construction)\b/i],
+ ["Photos",/\.(jpe?g|png|heic|webp|gif|tiff?)$/i]
+];
+function atlasBulkScope07611(id){
+ if(!id||id==="all")return new Set(atlasVaultFolders.map(f=>f.id));
+ const set=new Set([id]),queue=[id];
+ while(queue.length){const parent=queue.shift();for(const f of atlasVaultFolders)if(f.parentId===parent&&!set.has(f.id)){set.add(f.id);queue.push(f.id)}}
+ return set;
+}
+function atlasBulkChoose07611(d,text){
+ const name=d.name||"",sample=(name+" "+text).slice(0,18000);
+ const scored=atlasBulkRules07611.map(([category,re])=>({category,score:(re.test(name)?3:0)+(text&&re.test(text)?2:0)})).filter(x=>x.score>0).sort((a,b)=>b.score-a.score);
+ if(!scored.length)return {category:null,confidence:"unclassified"};
+ if(scored.length>1&&scored[0].score===scored[1].score)return {category:null,confidence:"ambiguous"};
+ return {category:scored[0].category,confidence:scored[0].score>=3?"high":"medium"};
+}
+async function atlasBulkText07611(d){
+ if(!d.blob||d.size>1024*1024)return "";
+ if(/\.(txt|md|csv|json|xml|html|htm|log)$/i.test(d.name)||String(d.type||"").startsWith("text/"))return (await d.blob.slice(0,32000).text()).slice(0,32000);
+ if(/\.docx$/i.test(d.name)&&window.JSZip){try{const zip=await JSZip.loadAsync(d.blob);const xml=await zip.file("word/document.xml")?.async("string");if(!xml)return "";const dom=new DOMParser().parseFromString(xml,"application/xml");return [...dom.getElementsByTagNameNS("http://schemas.openxmlformats.org/wordprocessingml/2006/main","t")].map(x=>x.textContent).join(" ").slice(0,32000)}catch{return ""}}
+ return "";
+}
+async function atlasBulkHash07611(d){
+ if(!d.blob||d.size>20*1024*1024||!globalThis.crypto?.subtle)return null;
+ try{const hash=await crypto.subtle.digest("SHA-256",await d.blob.arrayBuffer());return [...new Uint8Array(hash)].map(b=>b.toString(16).padStart(2,"0")).join("")}catch{return null}
+}
+async function atlasBulkPreview07611(scope){
+ if(atlasBulkBusy07611)throw Error("An organization operation is already running");
+ const folder=atlasVaultFolders.find(f=>f.id===scope),set=atlasBulkScope07611(scope);
+ if(scope!=="all"&&!folder)throw Error("Choose an existing Library folder");
+ const candidates=docs.filter(d=>(scope==="all"||set.has(d.folderId))&&!/backup|\.zip$/i.test(atlasVaultFolderPath(d.folderId)||"")&&!/\.zip$/i.test(d.name));
+ const roots=atlasVaultFolders.filter(f=>!f.parentId),proposals=[],ambiguous=[],hashes=new Map(),duplicates=[];
+ for(let i=0;i<candidates.length;i++){
+  const d=candidates[i],content=await atlasBulkText07611(d),choice=atlasBulkChoose07611(d,content);
+  if(choice.category){const existing=roots.find(f=>f.name.toLowerCase()===choice.category.toLowerCase());
+   if(d.folderId!==existing?.id)proposals.push({id:d.id,name:d.name,from:d.folderId||"",toCategory:choice.category,confidence:choice.confidence});
+  }else ambiguous.push({id:d.id,name:d.name,reason:choice.confidence});
+  const hash=await atlasBulkHash07611(d);if(hash){const key=d.size+":"+hash;if(hashes.has(key))duplicates.push({id:d.id,name:d.name,matches:hashes.get(key)});else hashes.set(key,d.id)}
+  if(i%20===0)await new Promise(r=>setTimeout(r,0));
+ }
+ const stamp=JSON.stringify([atlasVaultFolders.map(f=>[f.id,f.name,f.parentId]),docs.map(d=>[d.id,d.name,d.folderId,d.size])]);
+ atlasBulkPlan07611={id:uid("bulk"),scope,stamp,proposals,ambiguous,duplicates,scanned:candidates.length};return atlasBulkPlan07611;
+}
+// Unified organizer: one review plan, one write-ahead record, one metadata transaction.
+// The file blobs never leave IndexedDB; duplicates are reported, not deleted.
+function atlasUnifiedBuild07610(plan){
+ const roots=structuredClone(atlasVaultFolders),folders=structuredClone(roots),moves=[];
+ const categoryIds=new Map();
+ for(const p of plan.proposals){const key=p.toCategory.toLowerCase();if(!categoryIds.has(key)){
+  let f=folders.find(x=>!x.parentId&&x.name.toLowerCase()===key);
+  if(!f){f={id:uid("folder"),name:p.toCategory,parentId:""};folders.push(f)}categoryIds.set(key,f.id);
+ }}
+ for(const p of plan.proposals){const to=categoryIds.get(p.toCategory.toLowerCase());if(to&&p.from!==to)moves.push({id:p.id,from:p.from,to})}
+ // Cleanup is computed against the projected state, including all file moves.
+ const projected=docs.map(d=>({...d,folderId:moves.find(m=>m.id===d.id)?.to??d.folderId}));
+ const before=atlasVaultFolders;let cleanup;
+ try{atlasVaultFolders=folders;cleanup=atlasSmartBuild0766("all",projected)}finally{atlasVaultFolders=before}
+ // Cleanup may redirect files in merged folders. Combine into a single move per file.
+ const redirected=new Map(cleanup.moves.map(m=>[m.id,m.to]));
+ const allMoves=[];for(const d of docs){const initial=d.folderId||"",target=redirected.get(d.id)||moves.find(m=>m.id===d.id)?.to||initial;if(target!==initial)allMoves.push({id:d.id,from:initial,to:target})}
+ return {before:roots,after:cleanup.after,moves:allMoves,merges:cleanup.merges,renames:cleanup.renames,empty:cleanup.empty};
+}
+async function atlasBulkApply07611(plan,onProgress){
+ if(atlasBulkBusy07611)return {ok:false,error:"Another operation is running"};
+ atlasBulkBusy07611=true;let record=null;
+ try{
+  if(!plan||plan!==atlasBulkPlan07611)throw Error("Preview the plan again");
+  const pending=JSON.parse(localStorage.getItem(atlasBulkKey07611)||"null");
+  if(pending&&["pending","interrupted","undoing"].includes(pending.status))throw Error("Recover the interrupted operation with Undo first.");
+  const stamp=JSON.stringify([atlasVaultFolders.map(f=>[f.id,f.name,f.parentId]),docs.map(d=>[d.id,d.name,d.folderId,d.size])]);
+  if(stamp!==plan.stamp)throw Error("The Library changed. Preview again.");
+  const unified=atlasUnifiedBuild07610(plan);
+  record={id:plan.id,status:"pending",foldersBefore:unified.before,foldersAfter:unified.after,created:unified.after.filter(f=>!unified.before.some(x=>x.id===f.id)).map(f=>f.id),moves:unified.moves,at:new Date().toISOString()};
+  localStorage.setItem(atlasBulkKey07611,JSON.stringify(record));
+  onProgress?.("Applying "+record.moves.length+" moves in one transaction…");
+  await atlasSmartWriteMoves0766(record.moves);
+  // A persisted write-ahead record makes the folder metadata step recoverable.
+  atlasVaultFolders=structuredClone(record.foldersAfter);atlasSaveVaultFolders();
+  record.status="complete";localStorage.setItem(atlasBulkKey07611,JSON.stringify(record));
+  atlasBulkPlan07611=null;await loadDocs();render();
+  return {ok:true,moved:record.moves.length,created:record.created.length,merged:unified.merges.length,renamed:unified.renames.length,empty:unified.empty.length,duplicates:plan.duplicates.length,ambiguous:plan.ambiguous.length};
+ }catch(e){if(record){record.status="interrupted";localStorage.setItem(atlasBulkKey07611,JSON.stringify(record))}return {ok:false,error:String(e.message||e)}}finally{atlasBulkBusy07611=false}
+}
+async function atlasBulkUndo07611(){
+ if(atlasBulkBusy07611)return {ok:false,error:"Organizer is busy"};
+ atlasBulkBusy07611=true;
+ try{
+  const record=JSON.parse(localStorage.getItem(atlasBulkKey07611)||"null");if(!record||record.status==="undone")throw Error("No intelligent organization to undo");
+  const existing=new Map(docs.map(d=>[d.id,d]));const reverse=record.moves.filter(m=>(existing.get(m.id)?.folderId||"")===m.to).map(m=>({id:m.id,from:m.to,to:m.from}));
+  // Restore the original folder tree before reversing file moves.
+  atlasVaultFolders=structuredClone(record.foldersBefore);atlasSaveVaultFolders();record.status="undoing";localStorage.setItem(atlasBulkKey07611,JSON.stringify(record));
+  await atlasSmartWriteMoves0766(reverse);await loadDocs();
+  atlasSaveVaultFolders();
+  record.status="undone";localStorage.setItem(atlasBulkKey07611,JSON.stringify(record));render();return {ok:true,restored:reverse.length,skipped:record.moves.length-reverse.length};
+ }catch(e){return {ok:false,error:String(e.message||e)}}finally{atlasBulkBusy07611=false}
+}
+async function atlasBulkOpen07611(){
+ const scope=atlasVaultFolderFilter==="unfiled"?"all":atlasVaultFolderFilter;
+ const dialog=document.createElement("dialog");dialog.className="atlas-cleanup-dialog";
+ dialog.innerHTML='<h2>Intelligent Library organization</h2><p class="muted">Scans nested folders locally. Text and DOCX contents are read locally; PDF and image contents require explicit cloud approval. Detects exact duplicates without deleting them.</p><p role="status">Scanning locally…</p><button class="small-btn" id="atlasBulkCancel">Close</button>';
+ document.body.append(dialog);dialog.addEventListener("close",()=>dialog.remove());dialog.querySelector("#atlasBulkCancel").onclick=()=>dialog.close();dialog.showModal();
+ try{
+  const plan=await atlasBulkPreview07611(scope);if(!dialog.isConnected)return;
+  const count={};for(const p of plan.proposals)count[p.toCategory]=(count[p.toCategory]||0)+1;
+  const detail=Object.entries(count).map(([name,n])=>`<div>${esc(name)}: ${n} files</div>`).join("");
+  dialog.innerHTML=`<h2>Review organization plan</h2><p>Scanned ${plan.scanned} files recursively. Proposed ${plan.proposals.length} moves.</p><div class="atlas-cleanup-rows">${detail||"No confident moves proposed."}</div><p>${plan.ambiguous.length} ambiguous/unclassified files will stay put. ${plan.duplicates.length} exact duplicate candidates detected (up to 20 MB each); none will be deleted.</p><details><summary>Review proposed file moves</summary><div style="max-height:35vh;overflow:auto">${plan.proposals.map(p=>`<div>${esc(p.name)} → ${esc(p.toCategory)} (${p.confidence})</div>`).join("")}</div></details><p class="muted">One approval applies file moves, merges matching folders, standardizes folder names, and removes only verified empty folders. Duplicates are never deleted. Undo is available. Export a backup first.</p><p role="status" id="atlasBulkStatus"></p><div class="button-row"><button class="small-btn" id="atlasBulkCancel">Cancel</button><button class="primary-btn" id="atlasBulkApprove" ${plan.proposals.length?"":"disabled"}>Approve ${plan.proposals.length} moves</button></div>`;
+  dialog.querySelector("#atlasBulkCancel").onclick=()=>dialog.close();dialog.querySelector("#atlasBulkApprove").onclick=async()=>{dialog.querySelector("#atlasBulkApprove").disabled=true;const r=await atlasBulkApply07611(plan,s=>{const el=dialog.querySelector("#atlasBulkStatus");if(el)el.textContent=s});if(r.ok){dialog.close();toast(`${r.moved} files moved, ${r.merged} folders merged, ${r.empty} empty folders removed. No documents deleted.`)}else{const el=dialog.querySelector("#atlasBulkStatus");if(el)el.textContent=r.error}};
+ }catch(e){if(dialog.isConnected)dialog.querySelector('[role="status"]').textContent="Scan failed: "+String(e.message||e)}
+}
+
 function library(){
  const items=vaultVisible(),folder=atlasVaultFolders.find(f=>f.id===atlasVaultFolderFilter),crumbs=[];let f=folder,seen=new Set();
  while(f&&!seen.has(f.id)){seen.add(f.id);crumbs.unshift(f);f=atlasVaultFolders.find(x=>x.id===f.parentId)}
  const preview=docs.find(d=>d.id===vaultPreview);
- return `<div class="upload-zone"><h3>Files & Vault · 0.7.6.10</h3><p class="muted">Visual file manager with ATLAS Brain text and ATLAS voice tools. Files remain local; cloud file upload is not enabled yet.</p><div style="display:flex;flex-wrap:wrap;gap:9px"><label class="upload-label">Import files<input id="docInput" type="file" multiple></label><label class="upload-label">Import folder<input id="atlasFolderInput" type="file" webkitdirectory directory multiple></label><label class="upload-label">Import ZIP (keep archive)<input id="atlasZipInput" type="file" accept=".zip,application/zip,application/x-zip-compressed"></label><button class="small-btn" id="atlasSuggestImport">Suggest organization</button><button class="small-btn" id="atlasSmartOrganize0766" type="button">Merge &amp; clean folders</button><button class="small-btn" id="atlasSmartUndo0766" type="button">Undo folder cleanup</button><button class="small-btn" id="atlasVaultBackup" type="button">Create Full Backup</button><button class="small-btn" id="atlasVaultBackupReset" type="button">Restart Backup</button><button class="small-btn" id="atlasBackupsOpen" type="button">📁 Backups</button><label class="upload-label">Restore Vault ZIP batches<input id="atlasVaultRestore" type="file" accept=".zip,application/zip" multiple></label></div><div id="atlasVaultBackupStatus" class="muted" role="status" aria-live="polite">Create Full Backup makes every ZIP in sequence and stores it in ATLAS → Backups. Keep ATLAS open while processing. Archives are not yet saved to iPhone Files until you export them.</div><div id="atlasImportProgress" class="muted" role="status" aria-live="polite"></div><p class="muted" style="font-size:12px">Folder selection depends on iOS browser support. Files are copied, and existing ATLAS files are preserved. Filename suggestions stay on-device. Content analysis requires your explicit approval and sends the selected document to the AI service.</p></div>
+ return `<div class="upload-zone"><h3>Files & Vault · 0.7.6.10</h3><p class="muted">Visual file manager with ATLAS Brain text and ATLAS voice tools. Files remain local; cloud file upload is not enabled yet.</p><div style="display:flex;flex-wrap:wrap;gap:9px"><label class="upload-label">Import files<input id="docInput" type="file" multiple></label><label class="upload-label">Import folder<input id="atlasFolderInput" type="file" webkitdirectory directory multiple></label><label class="upload-label">Import ZIP (keep archive)<input id="atlasZipInput" type="file" accept=".zip,application/zip,application/x-zip-compressed"></label><button class="small-btn" id="atlasSuggestImport">Suggest organization</button><button class="small-btn" id="atlasBulkOrganize07611" type="button">Intelligent organize (review first)</button><button class="small-btn" id="atlasBulkUndo07611" type="button">Undo intelligent organization</button><button class="small-btn" id="atlasSmartOrganize0766" type="button">Merge &amp; clean folders</button><button class="small-btn" id="atlasSmartUndo0766" type="button">Undo folder cleanup</button><button class="small-btn" id="atlasVaultBackup" type="button">Create Full Backup</button><button class="small-btn" id="atlasVaultBackupReset" type="button">Restart Backup</button><button class="small-btn" id="atlasBackupsOpen" type="button">📁 Backups</button><label class="upload-label">Restore Vault ZIP batches<input id="atlasVaultRestore" type="file" accept=".zip,application/zip" multiple></label></div><div id="atlasVaultBackupStatus" class="muted" role="status" aria-live="polite">Create Full Backup makes every ZIP in sequence and stores it in ATLAS → Backups. Keep ATLAS open while processing. Archives are not yet saved to iPhone Files until you export them.</div><div id="atlasImportProgress" class="muted" role="status" aria-live="polite"></div><p class="muted" style="font-size:12px">Folder selection depends on iOS browser support. Files are copied, and existing ATLAS files are preserved. Filename suggestions stay on-device. Content analysis requires your explicit approval and sends the selected document to the AI service.</p></div>
  <div class="card"><div class="vault-toolbar"><button class="small-btn" id="vaultBack">← Back</button><button class="small-btn" id="vaultNewFolder">+ Folder</button><button class="small-btn" id="vaultSelect">${vaultSelectionMode?"Done":"Select"}</button><button class="small-btn" id="vaultView">${vaultView==="grid"?"List view":"Icon view"}</button></div>
  <div class="vault-path"><button class="small-btn" data-vault-filter="all">Home</button>${crumbs.map(c=>`<span>›</span><button class="small-btn" data-vault-filter="${esc(c.id)}">${esc(c.name)}</button>`).join("")}</div>
  <div class="form-grid"><input id="vaultSearch" placeholder="Search this folder" value="${esc(atlasVaultSearch)}"><select id="vaultSort"><option value="newest" ${atlasVaultSort==="newest"?"selected":""}>Newest first</option><option value="oldest" ${atlasVaultSort==="oldest"?"selected":""}>Oldest first</option><option value="name" ${atlasVaultSort==="name"?"selected":""}>Name</option></select></div>
@@ -1963,7 +2092,7 @@ document.querySelectorAll("[data-trash-purge]").forEach(b=>b.onclick=async()=>{c
 if($("#atlasUndoLastImport"))$("#atlasUndoLastImport").onclick=async()=>{const r=await atlasUndoImport();if(!r.ok)alert(r.error);else toast(`Undid ${r.kind}`)};
 document.querySelectorAll("[data-undo-import]").forEach(b=>b.onclick=async()=>{const r=await atlasUndoImport(b.dataset.undoImport);if(!r.ok)alert(r.error);else toast(`Undid ${r.kind}`)});
 if($("#atlasZipInput"))$("#atlasZipInput").onchange=async e=>{const result=await atlasImportZip(e.target.files?.[0]);if(result.ok)toast(`ZIP imported intact: ${result.imported} archive`);else alert(result.error)};
-if($("#atlasSuggestImport"))$("#atlasSuggestImport").onclick=atlasApplyImportSuggestions; if($("#atlasSmartOrganize0766"))$("#atlasSmartOrganize0766").onclick=atlasSmartOrganize0766; if($("#atlasSmartUndo0766"))$("#atlasSmartUndo0766").onclick=async()=>{const r=await atlasSmartUndo0766();if(r.ok)toast(`Folder cleanup undone${r.skipped?"; later edits preserved":""}`);else if(r.error!=="Cancelled")alert(r.error)};
+if($("#atlasBulkOrganize07611"))$("#atlasBulkOrganize07611").onclick=atlasBulkOpen07611; if($("#atlasBulkUndo07611"))$("#atlasBulkUndo07611").onclick=async()=>{if(!confirm("Undo the last intelligent organization? Later manual moves will be preserved."))return;const r=await atlasBulkUndo07611();if(r.ok)toast(`${r.restored} file moves undone`);else alert(r.error)}; if($("#atlasSuggestImport"))$("#atlasSuggestImport").onclick=atlasApplyImportSuggestions; if($("#atlasSmartOrganize0766"))$("#atlasSmartOrganize0766").onclick=atlasSmartOrganize0766; if($("#atlasSmartUndo0766"))$("#atlasSmartUndo0766").onclick=async()=>{const r=await atlasSmartUndo0766();if(r.ok)toast(`Folder cleanup undone${r.skipped?"; later edits preserved":""}`);else if(r.error!=="Cancelled")alert(r.error)};
 atlasImportProgress();
 if($("#clearDataBtn"))$("#clearDataBtn").onclick=()=>{if(confirm("Reset ATLAS metadata? Uploaded files will remain.")){data=clone(defaults);save();go("home")}}
 }
