@@ -1,4 +1,61 @@
+# ATLAS 0.7.6.8 — Git Ignore Configuration
+
+# Dependencies
 node_modules/
+.pnpm-store/
+.yarn/cache/
+
+# Environment variables and secrets
 .env
 .env.*
 !.env.example
+*.local
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+.nuxt/
+.output/
+.vercel/
+coverage/
+*.tsbuildinfo
+
+# Logs and temporary files
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+.cache/
+.tmp/
+temp/
+tmp/
+
+# Local development files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.code-workspace
+
+# Testing artifacts
+playwright-report/
+test-results/
+.nyc_output/
+
+# Local databases and backup artifacts
+*.sqlite
+*.sqlite3
+*.db-journal
+*.bak
+*.orig
