@@ -21,6 +21,10 @@ export default {async fetch(request){
   const b64=String(body.base64||"");
   if(!/^[A-Za-z0-9+/]*={0,2}$/.test(b64)||b64.length>11*1024*1024)return reply({error:"Invalid or oversized PDF"},400);
   input=[{type:"input_text",text:`Analyze the attached PDF named ${name}.`},{type:"input_file",filename:"document.pdf",file_data:"data:application/pdf;base64,"+b64}];
+ }else if(kind==="image"){
+  const b64=String(body.base64||""),mime=String(body.mime||"");
+  if(!["image/jpeg","image/png","image/webp","image/gif"].includes(mime)||!/^[A-Za-z0-9+/]*={0,2}$/.test(b64)||b64.length>9*1024*1024)return reply({error:"Invalid or oversized image"},400);
+  input=[{type:"input_text",text:`Describe and classify the supplied image named ${name}. If it is a scanned document, read its visible text for classification.`},{type:"input_image",image_url:`data:${mime};base64,${b64}`}];
  }else return reply({error:"Unsupported document type"},400);
  try{
   const upstream=await fetch("https://api.openai.com/v1/responses",{
