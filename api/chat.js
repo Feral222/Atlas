@@ -35,6 +35,7 @@ const ACTION_TOOLS = [
   {type:"function",name:"batch_vault_action",description:"Perform move, copy, tag, or delete on currently selected items. Copy and tag apply only to files. Reversible delete goes to Trash immediately without touchscreen confirmation when requested through ATLAS Brain or ATLAS. Report skipped items.",parameters:{type:"object",properties:{action:{type:"string",enum:["move","copy","tag","delete"]},folder_id:{type:"string"},tag:{type:"string"},confirmed:{type:"boolean"}},required:["action"]}},
 
 
+  {type:"function",name:"find_vault_folders",description:"Find a specific imported ATLAS Library folder by name or path. Returns exact IDs and direct item counts; use this instead of listing every folder when a folder name is known.",parameters:{type:"object",properties:{query:{type:"string"}},required:["query"]}},
   {type:"function",name:"list_vault_folders",description:"List folders and their exact IDs on this device before creating subfolders or moving files.",parameters:{type:"object",properties:{},additionalProperties:false}},
   {type:"function",name:"create_vault_folder",description:"Create a local folder, optionally inside an existing parent folder by exact parent_id. List folders first if parent is unknown.",parameters:{type:"object",properties:{name:{type:"string"},parent_id:{type:"string",description:"Existing folder ID or empty for root"}},required:["name"]}},
   {type:"function",name:"rename_vault_folder",description:"Rename an existing folder by exact ID. List folders first.",parameters:{type:"object",properties:{folder_id:{type:"string"},name:{type:"string"}},required:["folder_id","name"]}},
@@ -282,7 +283,7 @@ export default {
     const history = cleanHistory(body.history);
     const clientContext = JSON.stringify(body.client_context || {}).slice(0, 6000);
     const toolResults = Array.isArray(body.tool_results)
-      ? body.tool_results.slice(0, 12)
+      ? body.tool_results.slice(0, 40)
       : [];
     const actionRound = Number.isFinite(Number(body.action_round))
       ? Math.max(0, Math.min(5, Number(body.action_round)))
@@ -301,7 +302,8 @@ ATLAS 0.7.4.9.1 Actions + Voice + Local Vault:
 - Import stage: suggest organization by filename only, and apply only after explicit user approval. Do not claim to read file contents or access unimported iPhone folders.\n- Visual File Manager tools: browse folders, select individual or all visible items, read file metadata, and batch move/copy/tag/delete. Resolve exact IDs first. Copy and tag only support files. Never claim that file sharing or document content reading is available through AI. Move reversible deletions to Trash immediately after an addressed command. Never assume selected items persist after actions.\n- You can also create, rename and move local Vault folders, search imported files, and update file names, categories, tags and folder placement. Resolve exact IDs first using list_vault_folders and search_vault_files. Do not claim to read file contents or access the entire iPhone Files or Photos library. Delete only by moving files to Trash when addressed. Ask for clarification if names are ambiguous. Folders and file bytes remain on this device and do not cloud sync yet.\n- When the user asks ATLAS to perform one of those actions, USE the appropriate function tool instead of merely explaining how.
 - Never claim an action succeeded until a client tool result confirms success.
 - 
-- For any existing item, use search_atlas first if you do not have its exact ID.
+- For a named Library folder use find_vault_folders, not list_vault_folders. If found, reuse its ID from the tool result. Preview folder consolidation before changes; never assume the existing cleanup tool can classify every file by its contents.
+- For any existing non-Vault item, use search_atlas first if you do not have its exact ID.
 - If a search returns multiple plausible matches, ask the user which one they mean instead of changing one arbitrarily.
 - For archive, restore, or delete task requests, search_atlas for the task ID first, then call archive_task, restore_task, or delete_task. For undo requests, call undo_last_action exactly once. Never substitute search_atlas or another edit for undo. If undo fails, explain why without retrying.
 - If a tool result already satisfies the user's request, do not repeat that action. Confirm it briefly.
@@ -315,12 +317,15 @@ ${clientContext}`;
     const input = [...history, { role: "user", content: message }];
 
     if (toolResults.length) {
-      instructions += `\n\nThis is action round ${actionRound}. The client has executed the function calls from the previous round. Continue the same user request. Call another function only if the previous result proves another step is still required; otherwise answer with a concise confirmation.`;
+      // Results are cumulative within this request, so the model can use the
+      // successful folder lookup from an earlier round without repeating it.
+      const prior = toolResults.map(t=>({name:t.name,call_id:t.call_id,result:t.result}));
+      instructions += `\n\nThis is action round ${actionRound}. The client has executed the function calls listed below from ALL rounds of this request. Reuse folder IDs and successful results already present. Never repeat a completed lookup or action. If the named folder has been located, proceed using its ID, or explain the preview/approval required. Call another function only when needed.`;
       input.push({
         role: "user",
         content:
           "Trusted local ATLAS action results from the immediately preceding tool round:\n" +
-          JSON.stringify(toolResults),
+          JSON.stringify(prior),
       });
     }
 
