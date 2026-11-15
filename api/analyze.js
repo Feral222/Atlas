@@ -3,7 +3,7 @@ function reply(res,data,status=200){for(const [k,v] of Object.entries(headers))r
 // Vercel Node.js functions require a default exported request handler, not an object with fetch().
 export default async function handler(req,res){
  if(req.method==="OPTIONS"){for(const [k,v] of Object.entries(headers))res.setHeader(k,v);return res.status(204).end()}
- if(req.method==="GET")return reply(res,{ok:true,service:"atlas-analyze",version:"0.7.6.14"});
+ if(req.method==="GET")return reply(res,{ok:true,service:"atlas-analyze",version:"0.7.6.16"});
  if(req.method!=="POST")return reply(res,{error:"Method not allowed"},405);
  const password=process.env.ATLAS_ACCESS_PASSWORD,key=process.env.OPENAI_API_KEY;
  if(!password||!key)return reply(res,{error:"ATLAS AI service is not configured"},503);
