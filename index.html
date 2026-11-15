@@ -853,22 +853,58 @@ async function atlasBulkHash07611(d){
  if(!d.blob||d.size>20*1024*1024||!globalThis.crypto?.subtle)return null;
  try{const hash=await crypto.subtle.digest("SHA-256",await d.blob.arrayBuffer());return [...new Uint8Array(hash)].map(b=>b.toString(16).padStart(2,"0")).join("")}catch{return null}
 }
-async function atlasBulkPreview07611(scope){
+// Hybrid organizer: cloud analysis requires explicit batch consent. No silent uploads.
+const atlasHybridCacheKey07610="atlasHybridAnalysis07610";
+const atlasAllowedCategories07610=new Set(["General","Housing","Medical","Legal","Finance","Insurance","Vehicles","Pets","Receipts","Projects","Personal"]);
+function atlasSafeCategory07610(value){
+ const candidate=String(value||"").trim();
+ return [...atlasAllowedCategories07610].find(x=>x.toLowerCase()===candidate.toLowerCase())||null;
+}
+function atlasHybridCacheRead07610(){try{return JSON.parse(localStorage.getItem(atlasHybridCacheKey07610)||"{}")||{}}catch{return {}}}
+function atlasHybridCacheSave07610(cache){try{localStorage.setItem(atlasHybridCacheKey07610,JSON.stringify(cache))}catch(e){throw Error("Cannot save analysis checkpoint. Free browser storage or export a backup before proceeding.")}}
+function atlasHybridFingerprint07610(d){return [d.id,d.name,d.size,d.type,d.lastModified||0].join("|")}
+async function atlasHybridAnalyze07610(d){
+ const content=await atlasExtractDocument(d);
+ const response=await fetch("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json","X-Atlas-Password":brainPassword()},body:JSON.stringify({name:d.name,...content})});
+ const data=await response.json();if(!response.ok||!data.ok)throw Error(data.error||"Cloud analysis failed");
+ const a=data.analysis||{};
+ if(!["high","medium","low"].includes(a.confidence)||!atlasSafeCategory07610(a.category))throw Error("AI returned an unsupported or incomplete classification");
+ return {category:atlasSafeCategory07610(a.category),confidence:a.confidence,summary:String(a.summary||"").slice(0,300)};
+}
+async function atlasBulkPreview07611(scope,{cloud=false,onProgress=()=>{},signal=null}={}){
  if(atlasBulkBusy07611)throw Error("An organization operation is already running");
+ await loadDocs();
  const folder=atlasVaultFolders.find(f=>f.id===scope),set=atlasBulkScope07611(scope);
  if(scope!=="all"&&!folder)throw Error("Choose an existing Library folder");
- const candidates=docs.filter(d=>(scope==="all"||set.has(d.folderId))&&!/backup|\.zip$/i.test(atlasVaultFolderPath(d.folderId)||"")&&!/\.zip$/i.test(d.name));
+ const candidates=docs.filter(d=>!d.atlasTrashed&&(scope==="all"||set.has(d.folderId))&&!/\bbackups?\b/i.test(atlasVaultFolderPath(d.folderId)||"")&&!/\.zip$/i.test(d.name));
  const roots=atlasVaultFolders.filter(f=>!f.parentId),proposals=[],ambiguous=[],hashes=new Map(),duplicates=[];
+ const cache=atlasHybridCacheRead07610();let analyzed=0,skipped=0;
  for(let i=0;i<candidates.length;i++){
-  const d=candidates[i],content=await atlasBulkText07611(d),choice=atlasBulkChoose07611(d,content);
-  if(choice.category){const existing=roots.find(f=>f.name.toLowerCase()===choice.category.toLowerCase());
+  if(signal?.aborted)throw Error("Analysis cancelled. Completed classifications were saved for later.");
+  const d=candidates[i],fingerprint=atlasHybridFingerprint07610(d);
+  let choice;
+  if(cloud){
+   if(cache[d.id]?.fingerprint===fingerprint){choice=cache[d.id].choice}
+   else {
+    try{choice=await atlasHybridAnalyze07610(d)}
+    catch(e){
+     // Do not silently fall back to filenames and claim comprehensive analysis.
+     if(/Content analysis currently supports|Document bytes are unavailable|supports up to|ZIP engine unavailable/.test(String(e.message||e))){choice={category:null,confidence:"unsupported",reason:String(e.message||e)};skipped++}
+     else throw Error(`Analysis stopped at file ${i+1}/${candidates.length} (${d.name}): ${String(e.message||e)}. Completed classifications were checkpointed; retry to resume.`);
+    }
+    cache[d.id]={fingerprint,choice};atlasHybridCacheSave07610(cache);
+   }
+   analyzed++;
+  }else{const content=await atlasBulkText07611(d);choice=atlasBulkChoose07611(d,content)}
+  if(choice.category&&choice.confidence!=="low"){
+   const existing=roots.find(f=>f.name.toLowerCase()===choice.category.toLowerCase());
    if(d.folderId!==existing?.id)proposals.push({id:d.id,name:d.name,from:d.folderId||"",toCategory:choice.category,confidence:choice.confidence});
-  }else ambiguous.push({id:d.id,name:d.name,reason:choice.confidence});
+  }else ambiguous.push({id:d.id,name:d.name,reason:choice.reason||choice.confidence||"unclassified"});
   const hash=await atlasBulkHash07611(d);if(hash){const key=d.size+":"+hash;if(hashes.has(key))duplicates.push({id:d.id,name:d.name,matches:hashes.get(key)});else hashes.set(key,d.id)}
-  if(i%20===0)await new Promise(r=>setTimeout(r,0));
+  if(i%10===0){onProgress(`Scanned ${i+1}/${candidates.length} files${cloud?" with approved AI analysis":" locally"}…`);await new Promise(r=>setTimeout(r,0))}
  }
- const stamp=JSON.stringify([atlasVaultFolders.map(f=>[f.id,f.name,f.parentId]),docs.map(d=>[d.id,d.name,d.folderId,d.size])]);
- atlasBulkPlan07611={id:uid("bulk"),scope,stamp,proposals,ambiguous,duplicates,scanned:candidates.length};return atlasBulkPlan07611;
+ const stamp=atlasSmartStamp0766(atlasVaultFolders,await atlasSmartReadDocs0766());
+ atlasBulkPlan07611={id:uid("bulk"),scope,stamp,proposals,ambiguous,duplicates,scanned:candidates.length,cloud,analyzed,skipped};return atlasBulkPlan07611;
 }
 // Unified organizer: one review plan, one write-ahead record, one metadata transaction.
 // The file blobs never leave IndexedDB; duplicates are reported, not deleted.
@@ -896,15 +932,18 @@ async function atlasBulkApply07611(plan,onProgress){
   if(!plan||plan!==atlasBulkPlan07611)throw Error("Preview the plan again");
   const pending=JSON.parse(localStorage.getItem(atlasBulkKey07611)||"null");
   if(pending&&["pending","interrupted","undoing"].includes(pending.status))throw Error("Recover the interrupted operation with Undo first.");
-  const stamp=JSON.stringify([atlasVaultFolders.map(f=>[f.id,f.name,f.parentId]),docs.map(d=>[d.id,d.name,d.folderId,d.size])]);
+  const stamp=atlasSmartStamp0766(atlasVaultFolders,await atlasSmartReadDocs0766());
   if(stamp!==plan.stamp)throw Error("The Library changed. Preview again.");
   const unified=atlasUnifiedBuild07610(plan);
+  if(unified.moves.some(m=>!unified.after.some(f=>f.id===m.to)))throw Error("Invalid destination in organization plan. No files changed.");
   record={id:plan.id,status:"pending",foldersBefore:unified.before,foldersAfter:unified.after,created:unified.after.filter(f=>!unified.before.some(x=>x.id===f.id)).map(f=>f.id),moves:unified.moves,at:new Date().toISOString()};
   localStorage.setItem(atlasBulkKey07611,JSON.stringify(record));
   onProgress?.("Applying "+record.moves.length+" moves in one transaction…");
   await atlasSmartWriteMoves0766(record.moves);
   // A persisted write-ahead record makes the folder metadata step recoverable.
   atlasVaultFolders=structuredClone(record.foldersAfter);atlasSaveVaultFolders();
+  const verified=await atlasSmartReadDocs0766(),byId=new Map(verified.map(d=>[d.id,d]));
+  if(record.moves.some(m=>(byId.get(m.id)?.folderId||"")!==m.to))throw Error("Move verification failed. Use Undo to recover the operation.");
   record.status="complete";localStorage.setItem(atlasBulkKey07611,JSON.stringify(record));
   atlasBulkPlan07611=null;await loadDocs();render();
   return {ok:true,moved:record.moves.length,created:record.created.length,merged:unified.merges.length,renamed:unified.renames.length,empty:unified.empty.length,duplicates:plan.duplicates.length,ambiguous:plan.ambiguous.length};
@@ -914,26 +953,45 @@ async function atlasBulkUndo07611(){
  if(atlasBulkBusy07611)return {ok:false,error:"Organizer is busy"};
  atlasBulkBusy07611=true;
  try{
-  const record=JSON.parse(localStorage.getItem(atlasBulkKey07611)||"null");if(!record||record.status==="undone")throw Error("No intelligent organization to undo");
-  const existing=new Map(docs.map(d=>[d.id,d]));const reverse=record.moves.filter(m=>(existing.get(m.id)?.folderId||"")===m.to).map(m=>({id:m.id,from:m.to,to:m.from}));
-  // Restore the original folder tree before reversing file moves.
-  atlasVaultFolders=structuredClone(record.foldersBefore);atlasSaveVaultFolders();record.status="undoing";localStorage.setItem(atlasBulkKey07611,JSON.stringify(record));
-  await atlasSmartWriteMoves0766(reverse);await loadDocs();
-  atlasSaveVaultFolders();
-  record.status="undone";localStorage.setItem(atlasBulkKey07611,JSON.stringify(record));render();return {ok:true,restored:reverse.length,skipped:record.moves.length-reverse.length};
- }catch(e){return {ok:false,error:String(e.message||e)}}finally{atlasBulkBusy07611=false}
+  const record=JSON.parse(localStorage.getItem(atlasBulkKey07611)||"null");
+  if(!record||record.status==="undone")throw Error("No intelligent organization to undo");
+  if(!Array.isArray(record.moves)||!Array.isArray(record.foldersBefore))throw Error("Recovery record is incomplete; no changes were made.");
+  // Refuse to overwrite later manual folder edits during Undo.
+  const expected=JSON.stringify(record.foldersAfter||[]),current=JSON.stringify(atlasVaultFolders);
+  const original=JSON.stringify(record.foldersBefore);
+  if(current!==expected&&current!==original)throw Error("Folder structure changed since organization; automatic Undo would overwrite later edits");
+  // Read IndexedDB, not stale in-memory docs: this also recovers after an iOS restart.
+  const live=await atlasSmartReadDocs0766(),existing=new Map(live.map(d=>[d.id,d]));
+  const reverse=record.moves.filter(m=>(existing.get(m.id)?.folderId||"")===m.to).map(m=>({id:m.id,from:m.to,to:m.from}));
+  // Do not reverse files that the user moved again after organization.
+  record.status="undoing";localStorage.setItem(atlasBulkKey07611,JSON.stringify(record));
+  await atlasSmartWriteMoves0766(reverse);
+  const verified=await atlasSmartReadDocs0766(),byId=new Map(verified.map(d=>[d.id,d]));
+  if(reverse.some(m=>(byId.get(m.id)?.folderId||"")!==m.to))throw Error("Undo verification failed. Recovery record retained.");
+  // Restore the folder tree only after file reversal has been verified.
+  // Keep any folders added by the user since the organization.
+  const before=structuredClone(record.foldersBefore),beforeIds=new Set(before.map(f=>f.id));
+  const later=atlasVaultFolders.filter(f=>!record.foldersAfter.some(old=>old.id===f.id));
+  atlasVaultFolders=[...before,...later.filter(f=>!beforeIds.has(f.id))];atlasSaveVaultFolders();
+  record.status="undone";localStorage.setItem(atlasBulkKey07611,JSON.stringify(record));
+  await loadDocs();render();return {ok:true,restored:reverse.length,skipped:record.moves.length-reverse.length};
+ }catch(e){return {ok:false,error:String(e.message||e)+". Recovery record retained."}}finally{atlasBulkBusy07611=false}
 }
 async function atlasBulkOpen07611(){
  const scope=atlasVaultFolderFilter==="unfiled"?"all":atlasVaultFolderFilter;
  const dialog=document.createElement("dialog");dialog.className="atlas-cleanup-dialog";
- dialog.innerHTML='<h2>Intelligent Library organization</h2><p class="muted">Scans nested folders locally. Text and DOCX contents are read locally; PDF and image contents require explicit cloud approval. Detects exact duplicates without deleting them.</p><p role="status">Scanning locally…</p><button class="small-btn" id="atlasBulkCancel">Close</button>';
- document.body.append(dialog);dialog.addEventListener("close",()=>dialog.remove());dialog.querySelector("#atlasBulkCancel").onclick=()=>dialog.close();dialog.showModal();
+ const aborter=new AbortController();
+ dialog.innerHTML='<h2>Intelligent Library organization</h2><p class="muted">Scans nested folders locally. Hybrid mode can analyze supported PDF and image contents with explicit batch approval; local-only mode makes filename/text suggestions. Detects exact duplicates without deleting them.</p><p role="status">Scanning locally…</p><button class="small-btn" id="atlasBulkCancel">Close</button>';
+ document.body.append(dialog);dialog.addEventListener("close",()=>{aborter.abort();dialog.remove()});dialog.querySelector("#atlasBulkCancel").onclick=()=>dialog.close();dialog.showModal();
  try{
-  const plan=await atlasBulkPreview07611(scope);if(!dialog.isConnected)return;
+  const cloud=confirm("Use hybrid AI analysis for this Library organization?\n\nYES: Send the contents of supported files (including PDFs and images) to the ATLAS server and OpenAI for semantic classification. This may take considerable time and incur API costs. Results are checkpointed locally.\n\nNO: Use local filename/text suggestions only. No document contents will be uploaded.\n\nNeither choice moves or deletes files until you review and approve the plan.");
+  const plan=await atlasBulkPreview07611(scope,{cloud,signal:aborter.signal,onProgress:msg=>{const el=dialog.querySelector('[role="status"]');if(el)el.textContent=msg}});if(!dialog.isConnected)return;
   const count={};for(const p of plan.proposals)count[p.toCategory]=(count[p.toCategory]||0)+1;
   const detail=Object.entries(count).map(([name,n])=>`<div>${esc(name)}: ${n} files</div>`).join("");
-  dialog.innerHTML=`<h2>Review organization plan</h2><p>Scanned ${plan.scanned} files recursively. Proposed ${plan.proposals.length} moves.</p><div class="atlas-cleanup-rows">${detail||"No confident moves proposed."}</div><p>${plan.ambiguous.length} ambiguous/unclassified files will stay put. ${plan.duplicates.length} exact duplicate candidates detected (up to 20 MB each); none will be deleted.</p><details><summary>Review proposed file moves</summary><div style="max-height:35vh;overflow:auto">${plan.proposals.map(p=>`<div>${esc(p.name)} → ${esc(p.toCategory)} (${p.confidence})</div>`).join("")}</div></details><p class="muted">One approval applies file moves, merges matching folders, standardizes folder names, and removes only verified empty folders. Duplicates are never deleted. Undo is available. Export a backup first.</p><p role="status" id="atlasBulkStatus"></p><div class="button-row"><button class="small-btn" id="atlasBulkCancel">Cancel</button><button class="primary-btn" id="atlasBulkApprove" ${plan.proposals.length?"":"disabled"}>Approve ${plan.proposals.length} moves</button></div>`;
-  dialog.querySelector("#atlasBulkCancel").onclick=()=>dialog.close();dialog.querySelector("#atlasBulkApprove").onclick=async()=>{dialog.querySelector("#atlasBulkApprove").disabled=true;const r=await atlasBulkApply07611(plan,s=>{const el=dialog.querySelector("#atlasBulkStatus");if(el)el.textContent=s});if(r.ok){dialog.close();toast(`${r.moved} files moved, ${r.merged} folders merged, ${r.empty} empty folders removed. No documents deleted.`)}else{const el=dialog.querySelector("#atlasBulkStatus");if(el)el.textContent=r.error}};
+  const proposed=atlasUnifiedBuild07610(plan);
+  const cleanupDetail=`${proposed.merges.length} folder merges; ${proposed.renames.length} folder renames; ${proposed.empty.length} empty folders removed; ${proposed.after.length-proposed.before.length} net folders added.`;
+  dialog.innerHTML=`<h2>Review organization plan</h2><p>Scanned ${plan.scanned} files recursively (${plan.cloud?"AI-assisted hybrid":"local-only"}). Proposed ${plan.proposals.length} moves.</p><div class="atlas-cleanup-rows">${detail||"No confident moves proposed."}</div><p>${esc(cleanupDetail)}</p><details><summary>Review folder merges, renames, and removals</summary><div style="max-height:25vh;overflow:auto">${proposed.merges.map(x=>`<div>Merge: ${esc(x.sourceName)} → ${esc(x.targetName)}</div>`).join("")}${proposed.renames.map(x=>`<div>Rename: ${esc(x.from)} → ${esc(x.to)}</div>`).join("")}${proposed.empty.map(x=>`<div>Remove empty: ${esc(x.name)}</div>`).join("")}</div></details><p>${plan.ambiguous.length} ambiguous/unclassified files will stay put. ${plan.duplicates.length} exact duplicate candidates detected (up to 20 MB each); none will be deleted.</p><details><summary>Review proposed file moves</summary><div style="max-height:35vh;overflow:auto">${plan.proposals.map(p=>`<div>${esc(p.name)} → ${esc(p.toCategory)} (${p.confidence})</div>`).join("")}</div></details><p class="muted">One approval applies file moves, merges matching folders, standardizes folder names, and removes only verified empty folders. Duplicates are never deleted. Undo is available. Export a backup first.</p><p role="status" id="atlasBulkStatus"></p><div class="button-row"><button class="small-btn" id="atlasBulkCancel">Cancel</button><button class="primary-btn" id="atlasBulkApprove" ${plan.proposals.length?"":"disabled"}>Approve ${plan.proposals.length} moves</button></div>`;
+  dialog.querySelector("#atlasBulkCancel").onclick=()=>dialog.close();dialog.querySelector("#atlasBulkApprove").onclick=async()=>{if(!confirm("Have you exported and verified a recent Vault backup?\n\nThis operation changes folder organization. Cancel to back up first."))return;dialog.querySelector("#atlasBulkApprove").disabled=true;const r=await atlasBulkApply07611(plan,s=>{const el=dialog.querySelector("#atlasBulkStatus");if(el)el.textContent=s});if(r.ok){dialog.close();toast(`${r.moved} files moved, ${r.merged} folders merged, ${r.empty} empty folders removed. No documents deleted.`)}else{const el=dialog.querySelector("#atlasBulkStatus");if(el)el.textContent=r.error}};
  }catch(e){if(dialog.isConnected)dialog.querySelector('[role="status"]').textContent="Scan failed: "+String(e.message||e)}
 }
 
@@ -1107,7 +1165,7 @@ async function atlasSmartOrganize0766(){
     const plan=await atlasSmartPlan0766(atlasVaultFolderFilter),dialog=document.createElement("dialog");dialog.className="atlas-cleanup-dialog";
     const rows=[...plan.merges.map(m=>["Merge",m.sourceName+" → "+m.targetName]),...plan.renames.map(r=>["Rename",r.from+" → "+r.to]),...plan.empty.map(f=>["Remove empty folder",f.name])];
     dialog.innerHTML=`<h2>Review folder cleanup</h2><p class="muted">${esc(plan.scope==="all"?"Entire Library":atlasVaultFolderPath(plan.scope))} · ${plan.moves.length} files to move. File contents are preserved. Backup folders are excluded.</p><div class="atlas-cleanup-rows">${rows.length?rows.map(([kind,label])=>`<div><strong>${kind}</strong><p>${esc(label)}</p></div>`).join(""):"<p>No matching folders, clearer names or empty folders found.</p>"}</div><p class="muted">Undo preserves later changes. A new cleanup replaces the previous cleanup’s Undo record.</p><p role="status" class="atlas-cleanup-status"></p><div class="button-row"><button class="small-btn" data-cleanup-cancel>Cancel</button><button class="primary-btn" data-cleanup-apply ${rows.length?"":"disabled"}>Apply ${rows.length} changes</button></div>`;
-    document.body.append(dialog);dialog.addEventListener("close",()=>dialog.remove());dialog.querySelector("[data-cleanup-cancel]").onclick=()=>dialog.close();
+    document.body.append(dialog);dialog.addEventListener("close",()=>{aborter.abort();dialog.remove()});dialog.querySelector("[data-cleanup-cancel]").onclick=()=>dialog.close();
     dialog.querySelector("[data-cleanup-apply]").onclick=async()=>{const button=dialog.querySelector("[data-cleanup-apply]");button.disabled=true;const result=await atlasSmartApply0766(plan);if(result.ok){dialog.close();toast(`${result.merged} merged · ${result.renamed} renamed · ${result.emptyFolders} empty folders removed`)}else{dialog.querySelector(".atlas-cleanup-status").textContent=result.error}};
     dialog.showModal();
   }catch(e){alert(e.message)}

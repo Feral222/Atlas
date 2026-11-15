@@ -37,3 +37,22 @@ using any organizer. Do not clear browser data or uninstall the Home Screen app.
 
 ## Tests
 Run `npm ci` and `npm test` in a Node.js environment.
+
+## Hybrid organizer validation status (0.7.6.10 candidate)
+
+The organizer now offers explicit consent for a batch of AI-assisted document
+classifications. Supported PDF and image bytes, and extracted text, are sent to
+the configured Atlas AI backend only when consent is granted. Successful
+classifications are checkpointed locally so an interrupted scan can resume.
+Unrecognized or oversized formats are left unresolved rather than classified
+by filename and represented as content-analyzed.
+
+A 1,500-item simulated inventory and local-only/no-upload test pass. These tests
+do not establish correctness of live AI output, iPhone IndexedDB quotas,
+background suspension, network interruptions, or the complete move/Undo flow.
+Do not run against an irreplaceable Library without an independent export and
+an on-device pilot. This is a development candidate, not a production-certified build.
+
+
+## Organizer validation status
+The hybrid organizer is an integration build. Local inventory, supported-file cloud classification with consent, preview, metadata transactions, checkpointing and recovery tests exist. Full real-device iPhone validation, API rate/size behavior, scanned-image and PDF coverage, and interruption testing on a real Vault remain unverified. Do not use on the only copy of your files.
