@@ -1,4 +1,4 @@
-# ATLAS Command Center — 0.7.6.24
+# ATLAS Command Center — 0.7.6.25
 
 ATLAS is a mobile-friendly personal command center with tasks, notes,
 records, timeline, people, voice features, and a local Files & Vault library.
